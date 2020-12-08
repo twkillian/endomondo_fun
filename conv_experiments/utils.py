@@ -1,14 +1,21 @@
 import torch
 from torch import nn, optim
 from models import CNNet, TCNet
+from torch.utils.data import DataLoader
 
 def load_data(args):
+    # LOAD IN DATA
+    # SELECT Y VALS
+    # PROCESS TO MAKE X AND Y VALS
+    # CREATE DATALOADERS
     #TODO
     pass
 
 def get_criterion(args):
     if args.loss == 'ce':
         criterion = nn.CrossEntropyLoss()
+    elif args.loss = 'mse':
+        criterion = nn.MSELoss()
     return criterion
 
 def get_optimizer(args, model):
@@ -20,7 +27,7 @@ def get_optimizer(args, model):
 
 def get_model(args):
     if args.model == 'cnn':
-        model = CNNet(args.n_series, args.pooling_strategy)
+        model = CNNet(args.n_series, len(args.y_val), args.pooling_strategy)
     elif args.model == 'tcn':
         num_channels = [args.n_hidden]*(args.n_blocks-1)+[args.n_series]
         num_inputs = args.n_series

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.nn.utils import weight_norm
 
 class CNNet(nn.Module):
-    def __init__(self, n_series, pooling_strategy, dropout=0.2):
+    def __init__(self, n_series, n_output, pooling_strategy, dropout=0.2):
         super(Net, self).__init__()
         self.dropout = dropout
         
@@ -21,7 +21,7 @@ class CNNet(nn.Module):
             self.pool2 = nn.AveragePool1d(kernel_size=2, stride=2)
             self.pool3 = nn.AdaptiveAveragePool1d(output_size=32)
         
-        self.fc = nn.Linear(32, 1)
+        self.fc = nn.Linear(32, n_output)
         
     def forward(self, x):
         x = F.relu(self.conv1(x))
