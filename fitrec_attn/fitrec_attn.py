@@ -39,16 +39,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import time
 import os
-import util as util
-
-global logger
-
-util.setup_log()
-logger = util.logger
 
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-logger.info("Is CUDA available? %s.", torch.cuda.is_avaliable())
-
 
 class contextEncoder(nn.Module):
     """Encodes a sequence and a scalar contextual variable using LSTMs, the hidden states of each
@@ -89,7 +81,7 @@ class contextEncoder(nn.Module):
 
 class encoder(nn.Module):
     """Encoder module"""
-    def __init__(self, input_size, hidden_size, T, attr_embeddings, logger, dropout=0.1):
+    def __init__(self, input_size, hidden_size, T, attr_embeddings, dropout=0.1):
         # input size: number of underlying factors (81)
         # T: number of time steps (10)
         # hidden_size: dimension of the hidden state
@@ -99,7 +91,6 @@ class encoder(nn.Module):
         self.T = T
         self.user_embedding  = attr_embeddings[0]
         self.sport_embedding = attr_embeddings[1]
-        self.logger = logger
         self.dropout_rate = dropout
         self.dropout = nn.Dropout(dropout)
         print("encoder dropout: {}".format(self.dropout_rate))
@@ -148,14 +139,12 @@ class encoder(nn.Module):
 
 class decoder(nn.Module):
     """Decode the embedded hidden state to predict the next time step"""
-    def __init__(self, encoder_hidden_size, decoder_hidden_size, T, logger):
+    def __init__(self, encoder_hidden_size, decoder_hidden_size, T):
         super(decoder, self).__init__()
 
         self.T = T
         self.encoder_hidden_size = encoder_hidden_size
         self.decoder_hidden_size = decoder_hidden_size
-
-        self.logger = logger
 
         self.attn_layer = nn.Sequential(nn.Linear(2*decoder_hidden_size + encoder_hidden_size, encoder_hidden_size),
                                         nn.Tanh(),
@@ -201,11 +190,10 @@ class decoder(nn.Module):
 
 ## PUT ALL THESE PIECES TOGETHER TO FORM THE FITREC-ATTN MODEL
 class da_rnn:
-    def __init__(self, logger, encoder_hidden_size=64, decoder_hidden_size=64, 
+    def __init__(self, encoder_hidden_size=64, decoder_hidden_size=64, 
                 T=10, learning_rate = 0.01, batch_size=5120, parallel=True, debug=False, test_model_path=None):
 
         self.T = T
-        self.logger = logger
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         path = "../data"
@@ -242,17 +230,19 @@ class da_rnn:
         self.scale_toggle = True
         self.scaleTargets = False
 
-        self.trainValidTestFN = self.data_path.split(".")[0] + "_temporal_dataset.pkl"
+        self.trainValidTestFN = path +'/'+ self.data_path.split(".")[0] + "_temporal_dataset.pkl"
 
         
         # Prepare the data reader -- Preprocess the data for use
-        self.endo_reader = dataInterpreter(self.T, self.inputAtts, self.includeUers, self.includeSport,
+        self.endo_reader = dataInterpreter(self.T, self.inputAtts, self.includeUser, self.includeSport,
                                            self.includeTemporal, self.targetAtts, fn=self.data_path,
                                            scaleVals=self.scale_toggle, trimmed_workout_len=self.trimmed_workout_len,
                                            scaleTargets=self.scaleTargets, trainValidTestSplit=self.trainValidTestSplit,
                                            zMultiple=self.zMultiple, trainValidTestFN=self.trainValidTestFN)
 
         self.endo_reader.preprocess_data()
+
+        print("GOT HERE")
 
         self.input_dim = self.endo_reader.input_dim
         self.output_dim = self.endo_reader.output_dim
@@ -300,9 +290,9 @@ class da_rnn:
                 attr_embedding = attr_embedding.to(device)
 
         self.encoder = encoder(input_size=self.input_size, hidden_size=encoder_hidden_size, T=T,
-                               attr_embeddings=self.attr_embeddings, logger=logger).to(device)
+                               attr_embeddings=self.attr_embeddings).to(device)
         self.decoder = decoder(encoder_hidden_size=encoder_hidden_size,
-                               decoder_hidden_size=decoder_hidden_size, T=T, logger=logger).to(device)
+                               decoder_hidden_size=decoder_hidden_size, T=T).to(device)
         
         if parallel:
             self.encoder = nn.DataParallel(self.encoder)
@@ -544,7 +534,7 @@ def main():
     # T = 20
     T=10
     print("learning_rate = {}, batch_size = {}, hidden_size = {}, T = {}".format(learning_rate, batch_size, hidden_size, T))
-    model = da_rnn(logger=logger, parallel=False, T=T, encoder_hidden_size=hidden_size, decoder_hidden_size=hidden_size, learning_rate=learning_rate, batch_size=batch_size)
+    model = da_rnn(parallel=False, T=T, encoder_hidden_size=hidden_size, decoder_hidden_size=hidden_size, learning_rate=learning_rate, batch_size=batch_size)
 
     model.train(n_epochs=50)
 

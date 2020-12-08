@@ -95,7 +95,6 @@ class dataInterpreter(object):
             self.map_workout_id()
         else:
             print("load original data")
-            exit(0)
             pool = Pool(5) 
             with open(self.original_data_path, 'r') as f:
                 self.original_data =pool.map(process, f)
