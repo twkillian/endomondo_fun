@@ -91,7 +91,7 @@ class dataInterpreter(object):
         
         if os.path.exists(self.processed_path):
             print("{} exists".format(self.processed_path))
-            self.original_data = np.load(self.processed_path)[0]
+            self.original_data = np.load(self.processed_path,allow_pickle=True)[0]
             self.map_workout_id()
         else:
             print("load original data")
