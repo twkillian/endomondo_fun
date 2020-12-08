@@ -4,12 +4,16 @@ import os
 import argparse
 from utils import get_model, get_criterion, get_optimizer, get_scheduler, load_data
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 def setup_parser():
     parser = argparse.ArgumentParser(prog = 'TCN&CNN', description = 'Convolution approaches for time series forecasting and prediction')
     parser.add_argument('--task', choices = ['prediction', 'forecasting'], default='prediction', help = 'Task on which to train model')
     parser.add_argument('--y_val', type=str, default='sport', help='Output value used to train model')
     parser.add_argument('--model', choices=['cnn', 'tcn'], default = 'cnn', help = 'Model architecture to use for training')
     parser.add_argument('--n_series', type=str, default = 2, help = 'Number of time series in multivariate analysis')
+    parser.add_argument('--n_hidden', type=int, default = 2)
+    parser.add_argument('--n_blocks', type=int, default=4, help='# of temporal blocks (default: 4)')
     parser.add_argument('--pooling_strategy', choices=['max', 'avg'], default = 'max', help = 'Pooling strategy to use in model architecture')
     parser.add_argument('--n_epochs', type=int, default = 250, help = 'Number of epochs to train')
     parser.add_argument('--optimizer', type=str, default = 'adam', help = 'Optimizer to use for training model')

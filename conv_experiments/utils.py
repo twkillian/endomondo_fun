@@ -22,7 +22,9 @@ def get_model(args):
     if args.model == 'cnn':
         model = CNNet(args.n_series, args.pooling_strategy)
     elif args.model == 'tcn':
-        model = TCNet()
+        num_channels = [args.n_hidden]*(args.n_blocks-1)+[args.n_series]
+        num_inputs = args.n_series
+        model = TCNet(num_inputs, num_channels)
     return model
 
 def get_scheduler(args, optimizer):
