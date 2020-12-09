@@ -37,14 +37,14 @@ def map_data(train_idx, val_idx, test_idx, context, npy_data):
 def get_npy_data(args):
     raw_data = np.load(f'{args.dataset_path}/{npy_filename}', allow_pickle=True)[0]
     if args.n_series == 2:
-        np_ts_data = np.array(list(map(lambda x: [x['tar_heart_rate'], x['tar_derived_speed']], data)))
+        np_ts_data = np.array(list(map(lambda x: [x['tar_heart_rate'], x['tar_derived_speed']], raw_data)))
     elif args.n_series == 1:
-        np_ts_data = np.array(list(map(lambda x: [x[args.y_val]], data)))
+        np_ts_data = np.array(list(map(lambda x: [x[args.y_val]], raw_data)))
     else:
         raise ValueError('Invalid number of time series specified')
     
-    tensor_ts_data = torch.from_numpy(np_ts_data)
-    return tensor_ts_data
+    tensor_ts_data = torch.from_numpy(np_ts_data).float()
+    return raw_data, tensor_ts_data
 
 def get_metadata(args):
     with open(f'{args.dataset_path}/{temporal_pickle_filename}', 'rb') as f:

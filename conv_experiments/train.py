@@ -1,6 +1,7 @@
 import torch
 from torch import nn, optim
 import os
+import numpy as np
 from utils import get_model, get_criterion, get_optimizer, get_scheduler, load_data
 from parameters import setup_parser, print_args
 
@@ -8,8 +9,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def checkpoint_save(model, optimizer, lr_scheduler, epoch, CHECKPOINT_PATH):
     save_dict = {
-                'model_state_dict': model.state_dict()
-                'optimizer_state_dict': optimizer.state_dict()
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
                 'epoch': epoch
                 }
     if lr_scheduler is not None:
@@ -32,7 +33,7 @@ def evaluate(args, model, criterion, valloader):
     correct = 0.
     total = len(valloader.dataset)
     with torch.no_grad():
-        for x,y in valloader():
+        for x,y in valloader:
             x = x.to(device)
             y = y.to(device)
             
@@ -84,7 +85,7 @@ def train_log(args, epoch, model, criterion, valloader, mean_train_loss):
     print(metric_output)
     
 def main(args):
-    model = get_model(args)
+    model = get_model(args).to(device)
     optimizer = get_optimizer(args, model)
     lr_scheduler = get_scheduler(args, optimizer)
     criterion = get_criterion(args)
@@ -97,17 +98,18 @@ def main(args):
     if os.path.exists(CHECKPOINT_PATH):
         model, optimizer, lr_scheduler, start_epoch = checkpoint_load(model, optimizer, lr_scheduler, CHECKPOINT_PATH)
     
+    print('Started training!')
     for epoch in range(start_epoch, args.n_epochs):
         if lr_scheduler is not None:
             lr_scheduler.step()
-        mean_train_loss = train_epoch(args, model, optimizer, criterion, trainloader, valloader)
+        mean_train_loss = train_epoch(args, model, optimizer, criterion, trainloader)
         train_log(args, epoch, model, criterion, valloader, mean_train_loss)
         if epoch % args.checkpoint_interval == 0:
             checkpoint_save(model, optimizer, lr_scheduler, epoch, CHECKPOINT_PATH)
     
     if args.final_save_fpath is not None:
         torch.save({
-                    'args': vars(args)
+                    'args': vars(args),
                     'model_state_dict': model.state_dict()
                    }, args.final_save_fpath)
     

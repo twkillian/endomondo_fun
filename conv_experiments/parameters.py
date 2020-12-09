@@ -6,12 +6,12 @@ def print_args(args):
 
 def setup_parser():
     parser = argparse.ArgumentParser(prog = 'TCN&CNN', description = 'Convolution approaches for time series forecasting and prediction')
-    parser = argparse.add_argument('--dataset_path', type=str, default = '/scratch/hdd001/home/dullerud/endomondo')
+    parser.add_argument('--dataset_path', type=str, default = '/scratch/hdd001/home/dullerud/endomondo')
     parser.add_argument('--task', choices = ['prediction', 'forecasting'], default='forecasting', help = 'Task on which to train model')
     parser.add_argument('--y_val', nargs='+', type=str, default=None, help='Output values used to train model')
     parser.add_argument('--model', choices=['cnn', 'tcn'], default = 'tcn', help = 'Model architecture to use for training')
     parser.add_argument('--n_series', type=str, default = 2, help = 'Number of time series in multivariate analysis')
-    parser.add_argument('--n_hidden', type=int, default = 2)
+    parser.add_argument('--n_hidden', type=int, default = 32)
     parser.add_argument('--n_blocks', type=int, default=8, help='# of temporal blocks (default: 4)')
     parser.add_argument('--pooling_strategy', choices=['max', 'avg'], default = 'max', help = 'Pooling strategy to use in model architecture')
     parser.add_argument('--n_epochs', type=int, default = 250, help = 'Number of epochs to train')
