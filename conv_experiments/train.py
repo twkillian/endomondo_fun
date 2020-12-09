@@ -8,13 +8,13 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def setup_parser():
     parser = argparse.ArgumentParser(prog = 'TCN&CNN', description = 'Convolution approaches for time series forecasting and prediction')
-    parser = argparse.add_argument('--dataset_path', type=str, default = 'datasets/)
+    parser = argparse.add_argument('--dataset_path', type=str, default = '/scratch/hdd001/home/dullerud/endomondo')
     parser.add_argument('--task', choices = ['prediction', 'forecasting'], default='forecasting', help = 'Task on which to train model')
     parser.add_argument('--y_val', nargs='+', type=str, default=None, help='Output values used to train model')
     parser.add_argument('--model', choices=['cnn', 'tcn'], default = 'cnn', help = 'Model architecture to use for training')
     parser.add_argument('--n_series', type=str, default = 2, help = 'Number of time series in multivariate analysis')
     parser.add_argument('--n_hidden', type=int, default = 2)
-    parser.add_argument('--n_blocks', type=int, default=4, help='# of temporal blocks (default: 4)')
+    parser.add_argument('--n_blocks', type=int, default=8, help='# of temporal blocks (default: 4)')
     parser.add_argument('--pooling_strategy', choices=['max', 'avg'], default = 'max', help = 'Pooling strategy to use in model architecture')
     parser.add_argument('--n_epochs', type=int, default = 250, help = 'Number of epochs to train')
     parser.add_argument('--optimizer', type=str, default = 'adam', help = 'Optimizer to use for training model')
@@ -52,13 +52,13 @@ def checkpoint_load(model, optimizer, lr_scheduler, CHECKPOINT_PATH):
     return model, optimizer, lr_scheduler, start_epoch
     
 
-def evaluate(args, model, criterion, evalloader):
+def evaluate(args, model, criterion, valloader):
     model.eval()
     losses = []
     correct = 0.
-    total = len(evalloader.dataset)
+    total = len(valloader.dataset)
     with torch.no_grad():
-        for x,y in evalloader():
+        for x,y in valloader():
             x = x.to(device)
             y = y.to(device)
             
@@ -98,12 +98,12 @@ def train_epoch(args, model, optimizer, criterion, trainloader):
     mean_train_loss = np.mean(losses)
     return mean_train_loss
 
-def train_log(args, epoch, model, criterion, evalloader, mean_train_loss):
+def train_log(args, epoch, model, criterion, valloader, mean_train_loss):
     print('Epoch ', epoch, ' metrics:')
     metrics = {}
     metrics['mean_train_loss'] = mean_train_loss
     if epoch % args.eval_interval == 0:
-        mean_eval_loss, eval_acc = evaluate(args, model, criterion, evalloader)
+        mean_eval_loss, eval_acc = evaluate(args, model, criterion, valloader)
         metrics['mean_eval_loss'] = mean_eval_loss
         metrics['eval_acc'] = eval_acc
     metric_output = ', '.join([f'{key} : {value}' for key, value in metrics.items()])
@@ -116,7 +116,7 @@ def main(args):
     criterion = get_criterion(args)
     start_epoch = 0
     
-    trainloader, evalloader, testloader = load_data(args)
+    trainloader, valloader, testloader = load_data(args)
     
     CHECKPOINT_PATH = f'{args.checkpoint_dir}/checkpoint.tar'
     
@@ -126,8 +126,8 @@ def main(args):
     for epoch in range(start_epoch, args.n_epochs):
         if lr_scheduler is not None:
             lr_scheduler.step()
-        mean_train_loss = train_epoch(args, model, optimizer, criterion, trainloader, evalloader)
-        train_log(args, epoch, model, criterion, evalloader, mean_train_loss)
+        mean_train_loss = train_epoch(args, model, optimizer, criterion, trainloader, valloader)
+        train_log(args, epoch, model, criterion, valloader, mean_train_loss)
         if epoch % args.checkpoint_interval == 0:
             checkpoint_save(model, optimizer, lr_scheduler, epoch, CHECKPOINT_PATH)
     

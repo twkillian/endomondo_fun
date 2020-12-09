@@ -1,15 +1,23 @@
 import torch
 from torch import nn, optim
 from models import CNNet, TCNet
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
+from data_utils import TSData, map_data, get_npy_data, get_metadata
 
 def load_data(args):
-    # LOAD IN DATA
-    # SELECT Y VALS
-    # PROCESS TO MAKE X AND Y VALS
-    # CREATE DATALOADERS
-    #TODO
-    pass
+    data = get_npy_data(args)
+    train_idx, val_idx, test_idx, context = get_metadata(args)
+    train_idx, val_idx, test_idx = map_data(train_idx, val_idx, test_idx, context, data)
+    dataset = TSData(data)
+    
+    trainset = Subset(dataset, train_idx)
+    valset = Subset(dataset, val_idx)
+    testset = Subset(dataset, test_idx)
+    
+    trainloader = DataLoader(trainset, batch_size = args.batch_size)
+    valloader = DataLoader(valset, batch_size = args.eval_batch_size)
+    testloader = DataLoader(testset, batch_size = args.eval_batch_size)
+    return trainloader, valloader, testloader
 
 def get_criterion(args):
     if args.loss == 'ce':
