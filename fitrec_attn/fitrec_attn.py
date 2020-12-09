@@ -63,10 +63,10 @@ class contextEncoder(nn.Module):
         context_input_1 = self.dropout(context_input_1)
         context_input_2 = self.dropout(context_input_2)
 
-        hidden_1 = torch.zeros(1, context_input_1.size(0), self.hidden_size)
-        cell_1 = torch.zeros_like(hidden_1)
-        hidden_2 = torch.zeros(1, context_input_2.size(0), self.hidden_size)
-        cell_2 = torch.zeros_like(hidden_2)
+        hidden_1 = torch.zeros(1, context_input_1.size(0), self.hidden_size).to(device)
+        cell_1 = torch.zeros_like(hidden_1).to(device)
+        hidden_2 = torch.zeros(1, context_input_2.size(0), self.hidden_size).to(device)
+        cell_2 = torch.zeros_like(hidden_2).to(device)
 
         self.context_layer_1.flatten_parameters()
         outputs_1, lstm_states_1 = self.context_layer_1(context_input_1, (hidden_1, cell_1))
@@ -101,9 +101,9 @@ class encoder(nn.Module):
     def forward(self, attr_inputs, context_embedding, input_variable):
         for attr in attr_inputs:
             attr_input = attr_inputs[attr]
-            if attr == "user input":
+            if attr == "user_input":
                 attr_embed = self.user_embedding(attr_input)
-            if attr == "sport input":
+            if attr == "sport_input":
                 attr_embed = self.sport_embedding(attr_input)
             input_variable = torch.cat([attr_embed, input_variable], dim=-1)
 
@@ -111,13 +111,13 @@ class encoder(nn.Module):
 
         input_data = input_variable
 
-        input_weighted = torch.zeros(input_data.size(0), self.T, self.input_size)
-        input_encoded = torch.zeros(input_data.size(0), self.T, self.hidden_size)
-        hidden = torch.zeros(1, input_data.size(0), self.hidden_size)
-        cell = torch.zeros_like(hidden)
+        input_weighted = torch.zeros(input_data.size(0), self.T, self.input_size).to(device)
+        input_encoded = torch.zeros(input_data.size(0), self.T, self.hidden_size).to(device)
+        hidden = torch.zeros(1, input_data.size(0), self.hidden_size).to(device)
+        cell = torch.zeros_like(hidden).to(device)
 
         for t in range(self.T):
-            # Eqn 8: concatenate the hhidden states with each predictor
+            # Eqn 8: concatenate the hidden states with each predictor
             x = torch.cat((hidden.repeat(self.input_size, 1, 1).permute(1, 0, 2),
                            cell.repeat(self.input_size, 1, 1).permute(1, 0, 2),
                            input_data.permute(0, 2, 1)), dim=2)  # batch_size * input_size * (2*hidden_size + T)
@@ -128,7 +128,7 @@ class encoder(nn.Module):
             weighted_input = torch.mul(attn_weights, input_data[:, t, :])  # batch_size * input_size
 
             self.lstm_layer.flatten_parameters()
-            _, lstm_states = self.lstm_layer(weighted_input.unqueeze(0), (hidden, cell))
+            _, lstm_states = self.lstm_layer(weighted_input.unsqueeze(0), (hidden, cell))
             hidden = lstm_states[0]
             cell = lstm_states[1]
             # Save output
@@ -158,8 +158,8 @@ class decoder(nn.Module):
     def forward(self, input_encoded, y_history):
         # input_encoded: batch_size * T * encoder_hidden_size
         # y_history: batch_size * (T-1)
-        hidden = torch.zeros(1, input_encoded.size(0), self.decoder_hidden_size)
-        cell = torch.zeros_like(hidden)
+        hidden = torch.zeros(1, input_encoded.size(0), self.decoder_hidden_size).to(device)
+        cell = torch.zeros_like(hidden).to(device)
 
         for t in range(self.T):
             # Eqn 12-13: compute attention weights
@@ -170,7 +170,7 @@ class decoder(nn.Module):
             x = F.softmax(self.attn_layer(x.view(-1, 2*self.decoder_hidden_size+self.encoder_hidden_size)).view(-1, self.T), dim=-1)
 
             # Eqn 14: compute context vector
-            context = torch.bmm(x.unqueeze(1), input_encoded)[:, 0, :]  # batch_size * encoder_hidden_size
+            context = torch.bmm(x.unsqueeze(1), input_encoded)[:, 0, :]  # batch_size * encoder_hidden_size
 
             if t < self.T - 1:
                 # Eqn 15
@@ -242,8 +242,6 @@ class da_rnn:
 
         self.endo_reader.preprocess_data()
 
-        print("GOT HERE")
-
         self.input_dim = self.endo_reader.input_dim
         self.output_dim = self.endo_reader.output_dim
 
@@ -251,7 +249,7 @@ class da_rnn:
         self.valid_size = len(self.endo_reader.validationSet)
         self.test_size = len(self.endo_reader.testSet)
 
-        modelRunIdentifier = datetime.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+        modelRunIdentifier = dt.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
         self.model_file_name.append(modelRunIdentifier)  # Append a unique identifier to the filenames
         self.model_file_name = "_".join(self.model_file_name)
 
@@ -260,7 +258,7 @@ class da_rnn:
 
         # Build model
         # model
-        self.num_users = len(self.endo_reader.OneHotMap['userId'])
+        self.num_users = len(self.endo_reader.oneHotMap['userId'])
         self.num_sports = len(self.endo_reader.oneHotMap['sport'])
         self.num_genders = len(self.endo_reader.oneHotMap['gender'])
 
@@ -314,8 +312,8 @@ class da_rnn:
                 {'params': [param for name, param in self.encoder.named_parameters() if 'embedding' not in name]}
             ], lr=learning_rate)
         
-        self.context_encoder_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder.parameters()),
-                lr = learning_rate)
+        self.context_encoder_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder.parameters()), lr = learning_rate)
+        self.decoder_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder.parameters()), lr = learning_rate)
         self.loss_func = nn.MSELoss(size_average=True)
 
         if test_model_path:
@@ -336,7 +334,7 @@ class da_rnn:
             attr_inputs['sport_input'] = sport_input
 
         for attr in attr_inputs:
-            attr_inpt = attr_inputs[attr]
+            attr_input = attr_inputs[attr]
             attr_input = torch.from_numpy(attr_input).long().to(device)
 
             attr_inputs[attr] = attr_input
@@ -400,7 +398,7 @@ class da_rnn:
             validDataGen = self.endo_reader.generator_for_autotrain(self.batch_size, self.num_steps, "valid")
             val_loss = 0
             val_batch_num = 0
-            for val_batchh in validDataGen:
+            for val_batch in validDataGen:
                 val_batch_num += 1
 
                 attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target = self.get_batch(val_batch)
@@ -499,42 +497,17 @@ class da_rnn:
 
         return loss.detach().item()
 
-    def predict(self, on_train=False):
-        if on_train:
-            y_pred = np.zeros(self.train_size - self.T + 1)
-        else:
-            y_pred = np.zeros(self.X.shape[0] - self.train_size)
-        
-        # TODO(TWK): The following change slightly depending on how we update the prediciton task.
-        i = 0
-        while i < len(y_pred):
-            batch_idx = np.array(range(len(y_pred)))[i:(i+self.batch_size)]
-            X = np.zeros((len(batch_idx), self.T-1, self.X.shape[1]))
-            y_history = np.zeros((len(batch_idx), self.T-1))
-            for j in range(len(batch_idx)):
-                if on_train:
-                    X[j, :, :] = self.X[range(batch_idx[j], batch_idx[j]+self.T-1), :]
-                    y_history[j, :] = self.y[range(batch_idx[j], batch_idx[j]+self.T-1)]
-                else:
-                    X[j, :, :] = self.X[range(batch_idx[j] + self.train_size - self.T, batch_idx[j] + self.train_size-1), :]
-                    y_history[j, :] = self.y[range(batch_idx[j] + self.train_size-self.T, batch_idx[j]+self.train_size-1)]
-
-            y_history = torch.from_numpy(y_history).type(torch.FloatTensor).to(device)
-            _, input_encoded = self.encoder(torch.from_numpy(X).type(torch.FloatTensor).to(device))
-            y_pred[i:(i+self.batch_size)] = self.decoder(input_encoded, y_history).detach().cpu().numpy()[:,0]
-            i += self.batch_size
-        return y_pred
-
 
 def main():
     learning_rate = 0.005
-    batch_size = 5120
+    # batch_size = 5120
+    batch_size = 10240
     # batch_size = 12800 # Gigantic batch size... Needs to be farmed across GPUs...
     hidden_size = 64
     # T = 20
     T=10
     print("learning_rate = {}, batch_size = {}, hidden_size = {}, T = {}".format(learning_rate, batch_size, hidden_size, T))
-    model = da_rnn(parallel=False, T=T, encoder_hidden_size=hidden_size, decoder_hidden_size=hidden_size, learning_rate=learning_rate, batch_size=batch_size)
+    model = da_rnn(parallel=True, T=T, encoder_hidden_size=hidden_size, decoder_hidden_size=hidden_size, learning_rate=learning_rate, batch_size=batch_size)
 
     model.train(n_epochs=50)
 
