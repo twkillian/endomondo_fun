@@ -213,7 +213,8 @@ class dataInterpreter(object):
             if self.includeTemporal:
                 inputs_dict['context_input_1'] = context_input_1
                 inputs_dict['context_input_2'] = context_input_2
-
+            
+            # TODO(TWK): HERE'S WHERE WE CAN PULL FROM TO GENERATE A WINDOW TO PREDICT TO!
             # [T,D] -> many [10,D] windows   
             for t in range(num_steps - self.T): # total time - T segments with window size T
                 inputs_dict_t = {}
