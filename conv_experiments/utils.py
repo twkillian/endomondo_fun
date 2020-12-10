@@ -46,7 +46,7 @@ def get_scheduler(args, optimizer):
     if args.scheduler is None:
         lr_scheduler = None
     elif args.scheduler == 'plateau':
-        lr_scheduler = optim.ReduceLROnPlateau(optimizer, patience=args.patience)
+        lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=args.patience)
     elif args.scheduler == 'multistep':
-        lr_scheduler = optim.MultiStepLR(optimizer, milestones=args.milestones)
+        lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones)
     return lr_scheduler
