@@ -410,7 +410,7 @@ class da_rnn:
             if not best_val_loss or val_loss <= best_val_loss:
                 best_val_loss = val_loss
                 best_epoch = iteration
-                best_epoch_path = self.model_save_location+self.model_file_name+"_epoch_"+str(iteration)
+                best_epoch_path = self.model_save_location+self.model_file_name+"_best"
 
                 if not os.path.exists(self.model_save_location):
                     os.makedirs(self.model_save_location)
@@ -500,8 +500,8 @@ class da_rnn:
 
 def main():
     learning_rate = 0.005
-    # batch_size = 5120
-    batch_size = 10240
+    batch_size = 5120
+    # batch_size = 10240
     # batch_size = 12800 # Gigantic batch size... Needs to be farmed across GPUs...
     hidden_size = 64
     # T = 20
