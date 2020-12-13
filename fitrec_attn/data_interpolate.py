@@ -50,7 +50,7 @@ def process(line):
     return eval(line)
 
 class dataInterpreter(object):
-    def __init__(self, T, inputAtts, includeUser, includeSport, includeTemporal, targetAtts, fn="endomondoHR_proper.json", scaleVals=True, trimmed_workout_len=450, scaleTargets="scaleVals", trainValidTestSplit=[.8,.1,.1], zMultiple=5, trainValidTestFN=None):
+    def __init__(self, T, inputAtts, includeUser, includeSport, includeTemporal, targetAtts, targetHRZone, medianAge, targetDuration, fn="endomondoHR_proper.json", scaleVals=True, trimmed_workout_len=450, scaleTargets="scaleVals", trainValidTestSplit=[.8,.1,.1], zMultiple=5, trainValidTestFN=None):
         self.T = T
         self.filename = fn
         self.data_path = "../data"
@@ -74,6 +74,8 @@ class dataInterpreter(object):
         self.includeTemporal = includeTemporal
 
         self.targetAtts = ["tar_" + tAtt for tAtt in targetAtts]
+        self.heartRateTarget = targetHRZone*(220-medianAge)
+        self.targetDuration = targetDuration
 
         print("input attributes: ", self.inputAtts)
         print("target attributes: ", self.targetAtts)
@@ -162,13 +164,17 @@ class dataInterpreter(object):
         # loop each data point
         for idx in indices:
             current_input = self.original_data[idx] 
-            workoutid = current_input['id']    
+            workoutid = current_input['id']
+
+            current_sport = current_input['sport']
+            if current_sport not in ['bike', 'run']:  # We only are considering this binary classification
+                continue
  
             # for real time prediction, data is smoothed
             num_steps = len(current_input['distance'])
         
             inputs = np.zeros([inputDataDim, num_steps])
-            outputs = np.zeros([targetDataDim, num_steps])
+            outputs = np.zeros([targetDataDim, num_steps])  # Extra row to account for if target HR zone is reached for expected duration
             for att_idx, att in enumerate(inputAtts):
                 if att == 'time_elapsed':
                     #inputs[att_idx, :] = np.ones([1, num_steps]) * current_input[att][-1] # given the total workout length
@@ -177,6 +183,24 @@ class dataInterpreter(object):
                     inputs[att_idx, :] = current_input[att][:num_steps]
             for att in targetAtts:
                 outputs[0, :] = current_input[att][:num_steps]
+
+            ## Compute whether user reached targetHRzone for the target duration
+            # The goal is to be above 84% of max HR for a cumulative 12 minutes
+            workout_hr = np.array(current_input['tar_heart_rate'][:num_steps])
+            workout_timestamps = np.array(current_input['timestamp'][:num_steps])
+
+            # Extract the start and end times (in seconds) of the period 
+            # that the users heart rate was within the target HR zone
+            diffs = np.diff(1*np.insert(workout_hr >= self.heartRateTarget, 0, 0))
+            starts = workout_timestamps[diffs==1]
+            ends = workout_timestamps[np.roll(diffs,-1)==-1]
+
+            min_contiguous = min(len(starts), len(ends))  # Align the starts and ends
+            deltas = ends[:min_contiguous] - starts[:min_contiguous]  # Calc the number of seconds in target HR zone
+
+            target_meets_zone = 1*(sum(deltas)>=self.targetDuration)
+            target_sport = self.oneHotMap['sport'][current_input['sport']]
+
             inputs = np.transpose(inputs)
             outputs = np.transpose(outputs)
 
@@ -216,14 +240,14 @@ class dataInterpreter(object):
             
             # TODO(TWK): HERE'S WHERE WE CAN PULL FROM TO GENERATE A WINDOW TO PREDICT TO!
             # [T,D] -> many [10,D] windows   
-            for t in range(num_steps - self.T): # total time - T segments with window size T
+            for t in range(self.T, num_steps - 2*self.T): # total time - T segments with window size T
                 inputs_dict_t = {}
                 for k in inputs_dict:
-                    inputs_dict_t[k] = inputs_dict[k][t : t + self.T]
-                outputs_t = outputs[t : t + self.T]    
+                    inputs_dict_t[k] = inputs_dict[k][(t - self.T) : (t + self.T)]
+                outputs_t = outputs[(t - self.T) : (t + self.T)]    
                     
                 # yield one batch of window size time steps
-                yield (inputs_dict_t, outputs_t, [workoutid, t])
+                yield (inputs_dict_t, outputs_t, target_sport, target_meets_zone, [workoutid, t])
 
 
     # feed into Keras' fit_generator (automatically resets)
@@ -248,26 +272,30 @@ class dataInterpreter(object):
 
         for i in range(epoch_size):
 
-            inputs = np.zeros([batch_size, self.T, inputDataDim])
-            outputs = np.zeros([batch_size, self.T, targetDataDim])
+            inputs = np.zeros([batch_size, 2*self.T, inputDataDim])
+            outputs_ts = np.zeros([batch_size, 2*self.T, targetDataDim])
+            outputs_sport = np.zeros([batch_size, 1])
+            outputs_meetsTarget = np.zeros([batch_size, 1])
             workoutids = np.zeros([batch_size, 2])
 
             if self.includeUser:
-                user_inputs = np.zeros([batch_size, self.T])
+                user_inputs = np.zeros([batch_size, 2*self.T])
                 #user_inputs = np.zeros([batch_size, 1])
             if self.includeSport:
-                sport_inputs = np.zeros([batch_size, self.T])
+                sport_inputs = np.zeros([batch_size, 2*self.T])
                 #sport_inputs = np.zeros([batch_size, 1])
             if self.includeTemporal:
-                context_input_1 = np.zeros([batch_size, self.T, inputDataDim + 1])
-                context_input_2 = np.zeros([batch_size, self.T, targetDataDim])
+                context_input_1 = np.zeros([batch_size, 2*self.T, inputDataDim + 1])
+                context_input_2 = np.zeros([batch_size, 2*self.T, targetDataDim])
 
             inputs_dict = {'input':inputs}
             for j in range(batch_size):
                 current = next(batchGen)
                 inputs[j,:,:] = current[0]['input']
-                outputs[j,:,:] = current[1]
-                workoutids[j] = current[2]
+                outputs_ts[j,:,:] = current[1]
+                outputs_sport[j] = current[2]
+                outputs_meetsTarget[j] = current[3]
+                workoutids[j] = current[4]
                 if self.includeUser:
                     user_inputs[j,:] = current[0]['user_input']
                     #user_inputs[j] = current[0]['user_input']
@@ -284,7 +312,7 @@ class dataInterpreter(object):
                 inputs_dict['workoutid'] = workoutids
 
             # yield batch
-            yield(inputs_dict, outputs)
+            yield(inputs_dict, outputs_ts, outputs_sport, outputs_meetsTarget)
 
 
     def loadTrainValidTest(self):
