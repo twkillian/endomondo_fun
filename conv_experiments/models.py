@@ -94,3 +94,19 @@ class TCNet(nn.Module):
 
     def forward(self, x):
         return self.network(x)
+
+
+class ClassTCNet(nn.Module):
+    def __init__(self, num_inputs, num_channels, output_size, kernel_size=2, dropout=0.2):
+        super(ClassTCNet, self).__init__()
+        self.tcn = TCNet(num_inputs, num_channels, kernel_size, dropout)
+        self.linear = nn.Linear(num_channels[-1], output_size)
+        self.init_weights()
+
+    def init_weights(self):
+        self.linear.weight.data.normal_(0, 0.01)
+    
+    def forward(self, x):
+        x = self.tcn(x)
+        out = self.linear(x[:,:,-1])
+        return out
