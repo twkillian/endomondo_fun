@@ -2,7 +2,7 @@ import torch
 from torch import nn, optim
 from models import CNNet, TCNet, ClassTCNet
 from torch.utils.data import DataLoader, Subset
-from data_utils import TSData, map_data, get_npy_data, get_metadata
+from data_utils import TSData, ClassData, map_data, get_npy_data, get_metadata
 
 def load_data(args):
     raw_data, x_data, y_data = get_npy_data(args)
