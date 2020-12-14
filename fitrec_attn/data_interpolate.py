@@ -243,7 +243,7 @@ class dataInterpreter(object):
             for t in range(self.T, num_steps - 2*self.T): # total time - T segments with window size T
                 inputs_dict_t = {}
                 for k in inputs_dict:
-                    inputs_dict_t[k] = inputs_dict[k][(t - self.T) : (t + self.T)]
+                    inputs_dict_t[k] = inputs_dict[k][(t-self.T) : t]
                 outputs_t = outputs[(t - self.T) : (t + self.T)]    
                     
                 # yield one batch of window size time steps
@@ -272,21 +272,21 @@ class dataInterpreter(object):
 
         for i in range(epoch_size):
 
-            inputs = np.zeros([batch_size, 2*self.T, inputDataDim])
+            inputs = np.zeros([batch_size, self.T, inputDataDim])
             outputs_ts = np.zeros([batch_size, 2*self.T, targetDataDim])
             outputs_sport = np.zeros([batch_size, 1])
             outputs_meetsTarget = np.zeros([batch_size, 1])
             workoutids = np.zeros([batch_size, 2])
 
             if self.includeUser:
-                user_inputs = np.zeros([batch_size, 2*self.T])
+                user_inputs = np.zeros([batch_size, self.T])
                 #user_inputs = np.zeros([batch_size, 1])
             if self.includeSport:
                 sport_inputs = np.zeros([batch_size, 2*self.T])
                 #sport_inputs = np.zeros([batch_size, 1])
             if self.includeTemporal:
-                context_input_1 = np.zeros([batch_size, 2*self.T, inputDataDim + 1])
-                context_input_2 = np.zeros([batch_size, 2*self.T, targetDataDim])
+                context_input_1 = np.zeros([batch_size, self.T, inputDataDim + 1])
+                context_input_2 = np.zeros([batch_size, self.T, targetDataDim])
 
             inputs_dict = {'input':inputs}
             for j in range(batch_size):
