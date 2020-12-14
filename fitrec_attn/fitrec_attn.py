@@ -97,7 +97,7 @@ class encoder(nn.Module):
         print("encoder dropout: {}".format(self.dropout_rate))
 
         self.lstm_layer = nn.LSTM(input_size=input_size, hidden_size=hidden_size)
-        self.attn_linear = nn.Linear(in_features = 2*hidden_size+T, out_features=1)
+        self.attn_linear = nn.Linear(in_features = 2*hidden_size+2*T, out_features=1)
 
     def forward(self, attr_inputs, context_embedding, input_variable):
         for attr in attr_inputs:
@@ -106,14 +106,15 @@ class encoder(nn.Module):
                 attr_embed = self.user_embedding(attr_input)
             if attr == "sport_input":
                 attr_embed = self.sport_embedding(attr_input)
+
             input_variable = torch.cat([attr_embed, input_variable], dim=-1)
 
         input_variable = torch.cat([context_embedding, input_variable], dim=-1)
 
         input_data = input_variable
 
-        input_weighted = torch.zeros(input_data.size(0), self.T, self.input_size).to(device)
-        input_encoded = torch.zeros(input_data.size(0), self.T, self.hidden_size).to(device)
+        input_weighted = torch.zeros(input_data.size(0), 2*self.T, self.input_size).to(device)
+        input_encoded = torch.zeros(input_data.size(0), 2*self.T, self.hidden_size).to(device)
         hidden = torch.zeros(1, input_data.size(0), self.hidden_size).to(device)
         cell = torch.zeros_like(hidden).to(device)
 
@@ -123,7 +124,7 @@ class encoder(nn.Module):
                            cell.repeat(self.input_size, 1, 1).permute(1, 0, 2),
                            input_data.permute(0, 2, 1)), dim=2)  # batch_size * input_size * (2*hidden_size + T)
             # Eqn 9: Get attention weights
-            x = self.attn_linear(x.view(-1, 2*self.hidden_size + self.T))  # (batch_size * input_size) * 1
+            x = self.attn_linear(x.view(-1, 2*self.hidden_size + 2*self.T))  # (batch_size * input_size) * 1
             attn_weights = F.softmax(x.view(-1, self.input_size), dim=-1)  # batch_size * input_size, attn weights sum up to 1
             # Eqn 10: LSTM
             weighted_input = torch.mul(attn_weights, input_data[:, t, :])  # batch_size * input_size
@@ -152,7 +153,7 @@ class decoder(nn.Module):
                                         nn.Linear(encoder_hidden_size, 1))  # Here the last layer is trying to predict the next time step
         self.lstm_layer = nn.LSTM(input_size=1, hidden_size=decoder_hidden_size)
         self.fc = nn.Linear(encoder_hidden_size+1, 1)
-        self.fc_final = nn.Linear(decoder_hidden_size + encoder_hidden_size, T)  # Final prediction of the next time step
+        self.fc_final = nn.Linear(decoder_hidden_size + encoder_hidden_size, T)  # Final prediction of the next time window
 
         self.fc.weight.data.normal_()
 
@@ -165,23 +166,23 @@ class decoder(nn.Module):
         for t in range(self.T):
             # Eqn 12-13: compute attention weights
             ## batch_size * T * (2*decoder_hidden_size + encoder_hidden_size)
-            x = torch.cat((hidden.repeat(self.T, 1, 1).permute(1, 0, 2),
-                           cell.repeat(self.T, 1, 1).permute(1, 0, 2), 
+            x = torch.cat((hidden.repeat(2*self.T, 1, 1).permute(1, 0, 2),
+                           cell.repeat(2*self.T, 1, 1).permute(1, 0, 2), 
                            input_encoded), dim=2)
-            x = F.softmax(self.attn_layer(x.view(-1, 2*self.decoder_hidden_size+self.encoder_hidden_size)).view(-1, self.T), dim=-1)
+            x = F.softmax(self.attn_layer(x.view(-1, 2*self.decoder_hidden_size+self.encoder_hidden_size)).view(-1, 2*self.T), dim=-1)
 
             # Eqn 14: compute context vector
             context = torch.bmm(x.unsqueeze(1), input_encoded)[:, 0, :]  # batch_size * encoder_hidden_size
 
-            if t < self.T - 1:
-                # Eqn 15
-                y_tilde = self.fc(torch.cat((context, y_history[:, t].unsqueeze(1)), dim=1))  # batch_size * 1
+            # if t < self.T - 1:
+            # Eqn 15
+            y_tilde = self.fc(torch.cat((context, y_history[:, t].unsqueeze(1)), dim=1))  # batch_size * 1
 
-                # Eqn 16: LSTM
-                self.lstm_layer.flatten_parameters()
-                _, lstm_output = self.lstm_layer(y_tilde.unsqueeze(0), (hidden, cell))
-                hidden = lstm_output[0]  # 1 * batch_size * decoder_hidden_size
-                cell = lstm_output[1]  # 1 * batch_size * decoder_hidden_size
+            # Eqn 16: LSTM
+            self.lstm_layer.flatten_parameters()
+            _, lstm_output = self.lstm_layer(y_tilde.unsqueeze(0), (hidden, cell))
+            hidden = lstm_output[0]  # 1 * batch_size * decoder_hidden_size
+            cell = lstm_output[1]  # 1 * batch_size * decoder_hidden_size
 
         # Eqn 22: final output (hallelujah!)
         y_pred = self.fc_final(torch.cat((hidden[0], context), dim=1))
@@ -193,40 +194,48 @@ class decoder(nn.Module):
 
 class sport_decoder(nn.Module):
     """Using the embedded hidden state, predict the sport"""
-    def __init__(self, encoder_hidden_size):
+    def __init__(self, encoder_hidden_size, T):
         super(sport_decoder, self).__init__()
 
         self.encoder_hidden_size = encoder_hidden_size
+        self.T = T
         self.interim_hidden_size = 8
         
-        self.fc1 = nn.Linear(self.encoder_hidden_size, self.interim_hidden_size)
+        self.fc1 = nn.Linear(2*self.T*self.encoder_hidden_size, self.encoder_hidden_size)
+        self.fc2 = nn.Linear(self.encoder_hidden_size, self.interim_hidden_size)
         self.final_fc = nn.Linear(self.interim_hidden_size, 1)
         self.m = nn.ReLU()
+        self.q = nn.Sigmoid()
 
     def forward(self, input_encoded):
 
-        interim = self.m(self.fc1(input_encoded))
-        output = F.softmax(self.final_fc(interim), dim=-1)
+        hidden = self.m(self.fc1(input_encoded))
+        interim = self.m(self.fc2(hidden))
+        output = self.q(self.final_fc(interim))
 
         return output
 
 
 class zone_decoder(nn.Module):
     """Using the embedded hidden state, predict whether user hits their target HR zone"""
-    def __init__(self, encoder_hidden_size):
+    def __init__(self, encoder_hidden_size, T):
         super(zone_decoder, self).__init__()
 
         self.encoder_hidden_size = encoder_hidden_size
+        self.T = T
         self.interim_hidden_size = 8
-
-        self.fc1 = nn.Linear(self.encoder_hidden_size, self.interim_hidden_size)
+        
+        self.fc1 = nn.Linear(2*self.T*self.encoder_hidden_size, self.encoder_hidden_size)
+        self.fc2 = nn.Linear(self.encoder_hidden_size, self.interim_hidden_size)
         self.final_fc = nn.Linear(self.interim_hidden_size, 1)
         self.m = nn.ReLU()
+        self.q = nn.Sigmoid()
 
     def forward(self, input_encoded):
 
-        interim = self.m(self.fc1(input_encoded))
-        output = F.softmax(self.final_fc(interim), dim=-1)
+        hidden = self.m(self.fc1(input_encoded))
+        interim = self.m(self.fc2(hidden))
+        output = self.q(self.final_fc(interim))
 
         return output
 
@@ -319,7 +328,7 @@ class da_rnn:
         self.attr_num = 0
         self.attr_embeddings = []
         user_embedding = nn.Embedding(self.num_users, self.user_dim)
-        torch.nn.init.xavier_uniform(user_embedding.weight.data)
+        torch.nn.init.xavier_uniform_(user_embedding.weight.data)
         self.attr_embeddings.append(user_embedding)
         sport_embedding = nn.Embedding(self.num_sports, self.sport_dim)
         self.attr_embeddings.append(sport_embedding)
@@ -345,9 +354,9 @@ class da_rnn:
         self.decoder = decoder(encoder_hidden_size=encoder_hidden_size,
                                decoder_hidden_size=decoder_hidden_size, T=T).to(device)
         if self.predict_sport:
-            self.decoder_sport = sport_decoder(encoder_hidden_size=encoder_hidden_size).to(device)
+            self.decoder_sport = sport_decoder(encoder_hidden_size=encoder_hidden_size, T=T).to(device)
         if self.predict_zone:
-            self.decoder_meetHRzone = zone_decoder(encoder_hidden_size=encoder_hidden_size).to(device)
+            self.decoder_meetHRzone = zone_decoder(encoder_hidden_size=encoder_hidden_size, T=T).to(device)
         
         if parallel:
             self.encoder = nn.DataParallel(self.encoder)
@@ -375,13 +384,13 @@ class da_rnn:
         
         self.context_encoder_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder.parameters()), lr = learning_rate)
         self.decoder_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder.parameters()), lr = learning_rate)
-        self.loss_func = nn.MSELoss(size_average=True)
+        self.loss_func = nn.MSELoss(reduction='mean')
         if self.predict_sport:
-            self.decoder_sport_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder_sport.parameters()), lr = learning_rate)
-            self.loss_func_sport = nn.CrossEntropyLoss()
+            self.decoder_sport_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder_sport.parameters()), lr = 2*learning_rate, weight_decay=0.01)
+            self.loss_func_sport = nn.BCELoss()
         if self.predict_zone:
-            self.decoder_meetHRzone_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder_meetHRzone.parameters()), lr = learning_rate)
-            self.loss_func_meetHRzone = nn.CrossEntropyLoss()
+            self.decoder_meetHRzone_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder_meetHRzone.parameters()), lr = 2*learning_rate, weight_decay=0.01)
+            self.loss_func_meetHRzone = nn.BCELoss()
 
         if test_model_path:
             checkpoint = torch.load(test_model_path)
@@ -396,6 +405,10 @@ class da_rnn:
 
     # Prepare a provided batch from the data for use in training the FitRec-Attn Model
     def get_batch(self, batch):
+
+        # Filter out all non-biking (idx=13) and non-running (idx=42) activities
+        keep_idx = (batch[2].flatten()==13)|(batch[2].flatten()==42)
+
         attr_inputs = {}
         if self.includeUser:
             user_input = batch[0]['user_input']
@@ -406,17 +419,17 @@ class da_rnn:
 
         for attr in attr_inputs:
             attr_input = attr_inputs[attr]
-            attr_input = torch.from_numpy(attr_input).long().to(device)
+            attr_input = torch.from_numpy(attr_input[keep_idx]).long().to(device)
 
             attr_inputs[attr] = attr_input
+        
+        context_input_1 = torch.from_numpy(batch[0]['context_input_1'][keep_idx]).float().to(device)
+        context_input_2 = torch.from_numpy(batch[0]['context_input_2'][keep_idx]).float().to(device)
 
-        context_input_1 = torch.from_numpy(batch[0]['context_input_1'][:,-self.T:,:]).float().to(device)
-        context_input_2 = torch.from_numpy(batch[0]['context_input_2'][:,-self.T:,:]).float().to(device)
-
-        input_variable = torch.from_numpy(batch[0]['input']).float().to(device)
-        target_ts_variable = torch.from_numpy(batch[1]).float().to(device)
-        target_sport_variable = torch.where(torch.from_numpy(batch[2]) == 13, torch.ones(batch[2].shape), torch.zeros(batch[2].shape)).long().to(device)
-        target_meetHRZone_variable = torch.from_numpy(batch[3]).long().to(device)
+        input_variable = torch.from_numpy(batch[0]['input'][keep_idx]).float().to(device)
+        target_ts_variable = torch.from_numpy(batch[1][keep_idx]).float().to(device)
+        target_sport_variable = torch.where(torch.from_numpy(batch[2][keep_idx]) == 13, torch.ones(batch[2][keep_idx].shape), torch.zeros(batch[2][keep_idx].shape)).float().to(device)
+        target_meetHRzone_variable = torch.from_numpy(batch[3][keep_idx]).float().to(device)
 
         # TODO(TWK): This is where we can adjust how we predict the next K 
         # timesteps by adjusting the target variable. What needs to be done 
@@ -426,7 +439,7 @@ class da_rnn:
         y_history = target_ts_variable[:, :self.T, :].squeeze(-1)
         y_target = target_ts_variable[:, -self.T:, :].squeeze(-1)  # Convert to just pulling the the self.T steps into the "future"
 
-        return attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, target_sport_variable, target_meetHRZone_variable
+        return attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, target_sport_variable, target_meetHRzone_variable
 
 
     def train(self, n_epochs=30, print_every=400):
@@ -623,12 +636,12 @@ class da_rnn:
         loss += hr_loss
 
         if self.predict_sport:
-            pred_sport = self.decoder_sport(input_encoded)
+            pred_sport = self.decoder_sport(input_encoded.view(input_encoded.shape[0],-1))
             sport_loss = self.loss_func_sport(pred_sport, target_sport)
             loss += sport_loss
 
         if self.predict_zone:
-            pred_zone = self.decoder_meetHRzone(input_encoded)
+            pred_zone = self.decoder_meetHRzone(input_encoded.view(input_encoded.shape[0],-1))
             zone_loss = self.loss_func_meetHRzone(pred_zone, target_zone)
             loss += zone_loss
 
@@ -687,15 +700,16 @@ class da_rnn:
 
 
 def main(predict_sport=False, predict_zone=False):
-    learning_rate = 0.005
-    batch_size = 5120
+    learning_rate = 0.05
+    batch_size = 2000
+    # batch_size = 5120
     # batch_size = 10240
     # batch_size = 12800 # Gigantic batch size... Needs to be farmed across GPUs...
     hidden_size = 64
     # T = 20
     T=10
     print("learning_rate = {}, batch_size = {}, hidden_size = {}, T = {}".format(learning_rate, batch_size, hidden_size, T))
-    model = da_rnn(parallel=True, T=T, encoder_hidden_size=hidden_size, decoder_hidden_size=hidden_size, learning_rate=learning_rate, batch_size=batch_size, predict_sport=predict_sport, predict_zone=predict_zone)
+    model = da_rnn(parallel=False, T=T, encoder_hidden_size=hidden_size, decoder_hidden_size=hidden_size, learning_rate=learning_rate, batch_size=batch_size, predict_sport=predict_sport, predict_zone=predict_zone)
 
     model.train(n_epochs=50)
 
@@ -719,6 +733,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--predict_sport', dest='predict_sport', action='store_true')
     parser.add_argument('--predict_zone', dest='predict_zone', action='store_true')
+    parser.add_argument('--baseline', dest='baseline', action='store_true')
 
     args = parser.parse_args()
     main(predict_sport=args.predict_sport, predict_zone=args.predict_zone)
