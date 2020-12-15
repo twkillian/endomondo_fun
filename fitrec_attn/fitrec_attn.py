@@ -243,18 +243,25 @@ class zone_decoder(nn.Module):
 ## PUT ALL THESE PIECES TOGETHER TO FORM THE FITREC-ATTN MODEL
 class da_rnn:
     def __init__(self, encoder_hidden_size=64, decoder_hidden_size=64, 
-                T=10, learning_rate = 0.01, batch_size=5120, parallel=True, debug=False, test_model_path=None, predict_sport=False, predict_zone=False):
+                T=10, learning_rate = 0.01, batch_size=5120, parallel=True, 
+                debug=False, test_model_path=None, predict_sport=False, 
+                predict_zone=False, checkpoint_dir='.', checkpoint_freq=5):
 
         self.T = T
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         path = "../data"
+        # path = "/scratch/ssd001/home/tkillian/fitrec/data"
         self.model_save_location = "/scratch/gobi2/tkillian/endomondo/model_states/"
-        self.summaries_dir = path + "/fitrec-attn/logs/"
+        # self.model_save_location = "/scratch/ssd001/home/tkillian/fitrec/"
         self.data_path = "endomondoHR_proper.json"
         self.patience = 3  # [3, 5, 10]
         self.max_epochs = 50
+        self.start_epoch = 0
         self.zMultiple = 5
+
+        self.checkpoint_path = f'{checkpoint_dir}/checkpoint.pt'
+        self.checkpoint_freq = checkpoint_freq
 
         self.predict_sport = predict_sport
         self.predict_zone = predict_zone
@@ -311,8 +318,8 @@ class da_rnn:
         self.valid_size = len(self.endo_reader.validationSet)
         self.test_size = len(self.endo_reader.testSet)
 
-        modelRunIdentifier = dt.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
-        self.model_file_name.append(modelRunIdentifier)  # Append a unique identifier to the filenames
+        # modelRunIdentifier = dt.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+        # self.model_file_name.append(modelRunIdentifier)  # Append a unique identifier to the filenames
         self.model_file_name = "_".join(self.model_file_name)
 
         self.model_save_location += self.model_file_name + "/"
@@ -392,6 +399,9 @@ class da_rnn:
             self.decoder_meetHRzone_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder_meetHRzone.parameters()), lr = 2*learning_rate, weight_decay=0.01)
             self.loss_func_meetHRzone = nn.BCELoss()
 
+        if os.path.exists(self.checkpoint_path):
+            self.checkpoint_load()
+
         if test_model_path:
             checkpoint = torch.load(test_model_path)
             self.encoder.load_state_dict(checkpoint['en'])
@@ -403,6 +413,53 @@ class da_rnn:
                 self.decoder_meetHRzone.load_state_dict(checkpoint['de_zone'])
             print("test model: {}".format(test_model_path))
 
+    def save_checkpoint(self, iteration):
+        '''Save off checkpoint'''
+        if not os.path.exists(self.checkpoint_path):
+            os.makedirs(self.checkpoint_path)
+
+        save_dict = {
+            'epoch': iteration,
+            'en': self.encoder.state_dict(),
+            'context_en': self.context_encoder.state_dict(),
+            'de': self.decoder.state_dict(),
+            'en_opt': self.encoder_optimizer.state_dict(),
+            'context_en_opt': self.context_encoder_optimizer.state_dict(),
+            'de_opt': self.decoder_optimizer.state_dict(),
+            'loss': loss,
+            'best_val_loss': self.best_val_loss,
+            'best_epoch': self.best_epoch
+            }
+        if self.predict_sport:
+            save_dict['de_sport'] = self.decoder_sport.state_dict()
+            save_dict['de_sport_opt'] = self.decoder_sport_optimizer.state_dict()
+        if self.predict_zone:
+            save_dict['de_zone'] = self.decoder_meetHRzone.state_dict()
+            save_dict['de_zone_opt'] = self.decoder_meetHRzone_optimizer.state_dict()
+        torch.save(save_dict, self.checkpoint_path)
+
+
+    def load_checkpoint(self):
+        '''Load saved checkpoint'''
+        checkpoint = torch.load(self.checkpoint_path)
+        self.encoder.load_state_dict(checkpoint['en'])
+        self.context_encoder.load_state_dict(checkpoint['context_en'])
+        self.decoder.load_state_dict(checkpoint['de'])
+        self.context_encoder_optimizer.load_state_dict(checkpoint['context_en_opt'])
+        self.encoder_optimizer.load_state_dict(checkpoint['en_opt'])
+        self.decoder_optimizer.load_state_dict(checkpoint['de_opt'])
+        if predict_sport:
+            self.decoder_sport.load_state_dict(checkpoint['de_sport'])
+            self.decoder_sport_optimizer.load_state_dict(checkpoint['de_sport_opt'])
+        if predict_zone:
+            self.decoder_meetHRzone.load_state_dict(checkpoint['de_zone'])
+            self.decoder_meetHRzone.load_state_dict(checkpoint['de_zone_opt'])
+
+        self.best_val_loss = checkpoint['best_val_loss']
+        self.best_epoch = checkpoint['best_epoch']
+        self.start_epoch = checkpoint['epoch']
+    
+    
     # Prepare a provided batch from the data for use in training the FitRec-Attn Model
     def get_batch(self, batch):
 
@@ -446,13 +503,11 @@ class da_rnn:
 
         # Initialize
         print('Initializing...')
-        start_epoch = 0
-        best_val_loss = None
+        self.best_val_loss = None
         best_epoch_path = None
-        best_valid_score = 9999999999
-        best_epoch = 0
+        self.best_epoch = 0
 
-        for iteration in range(n_epochs):
+        for iteration in range(self.start_epoch, n_epochs):
             print('\n')
             print('-'*50)
             print('Iteration', iteration)
@@ -521,9 +576,9 @@ class da_rnn:
                 val_loss += loss
             val_loss /= val_batch_num
             print('-'*89)
-            if not best_val_loss or val_loss <= best_val_loss:
-                best_val_loss = val_loss
-                best_epoch = iteration
+            if not self.best_val_loss or val_loss <= self.best_val_loss:
+                self.best_val_loss = val_loss
+                self.best_epoch = iteration
                 best_epoch_path = self.model_save_location+self.model_file_name+"_best"
 
                 if not os.path.exists(self.model_save_location):
@@ -537,7 +592,9 @@ class da_rnn:
                     'en_opt': self.encoder_optimizer.state_dict(),
                     'context_en_opt': self.context_encoder_optimizer.state_dict(),
                     'de_opt': self.decoder_optimizer.state_dict(),
-                    'loss': loss
+                    'loss': loss,
+                    'best_val_loss': self.best_val_loss,
+                    'best_epoch': self.best_epoch,
                     }
                 if self.predict_sport:
                     save_dict['de_sport'] = self.decoder_sport.state_dict()
@@ -546,6 +603,9 @@ class da_rnn:
                     save_dict['de_zone'] = self.decoder_meetHRzone.state_dict()
                     save_dict['de_zone_opt'] = self.decoder_meetHRzone_optimizer.state_dict()
                 torch.save(save_dict, best_epoch_path)
+
+            if iteration % self.checkpoint_freq:
+                self.save_checkpoint(iteration)
 
             elif (iteration - best_epoch < self.patience):
                 pass
@@ -699,17 +759,19 @@ class da_rnn:
         return return_losses
 
 
-def main(predict_sport=False, predict_zone=False):
+def main(predict_sport=False, predict_zone=False, checkpoint_dir='.'):
     learning_rate = 0.05
-    batch_size = 2000
-    # batch_size = 5120
+    batch_size = 5120
     # batch_size = 10240
     # batch_size = 12800 # Gigantic batch size... Needs to be farmed across GPUs...
     hidden_size = 64
     # T = 20
     T=10
     print("learning_rate = {}, batch_size = {}, hidden_size = {}, T = {}".format(learning_rate, batch_size, hidden_size, T))
-    model = da_rnn(parallel=False, T=T, encoder_hidden_size=hidden_size, decoder_hidden_size=hidden_size, learning_rate=learning_rate, batch_size=batch_size, predict_sport=predict_sport, predict_zone=predict_zone)
+    model = da_rnn(parallel=False, T=T, encoder_hidden_size=hidden_size, 
+        decoder_hidden_size=hidden_size, learning_rate=learning_rate, 
+        batch_size=batch_size, predict_sport=predict_sport, 
+        predict_zone=predict_zone, checkpoint_dir=checkpoint_dir)
 
     model.train(n_epochs=50)
 
@@ -734,6 +796,7 @@ if __name__ == '__main__':
     parser.add_argument('--predict_sport', dest='predict_sport', action='store_true')
     parser.add_argument('--predict_zone', dest='predict_zone', action='store_true')
     parser.add_argument('--baseline', dest='baseline', action='store_true')
+    parser.add_argument('--checkpoint_dir', dest='checkpoint_dir', type=str, default = '.', help = 'Checkpoint directory')
 
     args = parser.parse_args()
-    main(predict_sport=args.predict_sport, predict_zone=args.predict_zone)
+    main(predict_sport=args.predict_sport, predict_zone=args.predict_zone, checkpoint_dir=args.checkpoint_dir)
