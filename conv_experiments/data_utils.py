@@ -67,8 +67,8 @@ def get_npy_data(args):
     if args.task == 'forecasting':
         tensor_y = torch.from_numpy(y).float()
         
-    elif args.task == 'prediction' and 'sport' in args.x_vals:
-        tensor_y = torch.from_numpy([1 if 'run' in sport else 0 for sport in y.flatten()]).reshape(*y.shape)
+    elif args.task == 'prediction' and 'sport' in args.y_vals:
+        tensor_y = torch.from_numpy(np.array([1. if 'run' in sport else 0. for sport in y.flatten()])).reshape(*y.shape)
     
     else:
         raise NotImplementedError
