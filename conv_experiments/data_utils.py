@@ -52,16 +52,13 @@ def map_data(train_idx, val_idx, test_idx, context, npy_data):
     test_idx = [idxMap[wid] for wid in test_idx]
     
     return train_idx, val_idx, test_idx
-    
-def get_class_data(args, y):
-    if 'sport' in args.y_vals:
-        indices = np.where(np.logical_or.reduce((np.core.defchararray.find(y.flatten(),'bike')!=-1,np.core.defchararray.find(y.flatten(),'cycling')!=-1, np.core.defchararray.find(y.flatten(),'run')!=-1)))[0]
-        y = y[indices]
-        int_y = np.array([1 if 'run' in e else 0 for e in y.flatten()])
-    return indices, int_y
 
 def get_npy_data(args):
     raw_data = np.load(f'{args.dataset_path}/{npy_filename}', allow_pickle=True)[0]
+    
+    if args.task == 'prediction' and 'sport' in args.x_vals:
+        raw_data = np.array([w for w in raw_data if w['sport'] in ['bike', 'run']])
+    
     input = np.array(list(map(lambda x: [x[col] for col in args.x_vals], raw_data)))
     y = np.array(list(map(lambda x: [x[col] for col in args.y_vals], raw_data)))
     
@@ -70,10 +67,11 @@ def get_npy_data(args):
     if args.task == 'forecasting':
         tensor_y = torch.from_numpy(y).float()
         
-    elif args.task == 'prediction':
-        indices, int_y = get_class_data(args, y)
-        tensor_input = tensor_input[indices]
-        tensor_y = torch.from_numpy(int_y)
+    elif args.task == 'prediction' and 'sport' in args.x_vals:
+        tensor_y = torch.from_numpy([1 if 'run' in sport else 0 for sport in y.flatten()]).reshape(*y.shape)
+    
+    else:
+        raise NotImplementedError
         
     return raw_data, tensor_input, tensor_y
 
