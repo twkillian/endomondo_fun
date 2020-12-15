@@ -25,7 +25,7 @@ class TSData(Dataset):
 
 class ClassData(Dataset):
     def __init__(self, x, y):
-        super(TSData, self).__init__()
+        super(ClassData, self).__init__()
         self.x = x
         self.y = y
         
