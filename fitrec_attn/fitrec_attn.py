@@ -17,7 +17,7 @@ University of Toronto, CSC2515 Final Project -- Fall 2020
 
 ################################################################################
 Notes:
-TWK - Currently, this is just the base implementation of the model to get a feel
+TWK - TODO UPDATE: Currently, this is just the base implementation of the model to get a feel
     for how it runs and trains. Once I get it to train in a stable manner, I will
     update the batch sampling code and the training scripts to support the tasks
     we're interested in.
@@ -97,7 +97,7 @@ class encoder(nn.Module):
         print("encoder dropout: {}".format(self.dropout_rate))
 
         self.lstm_layer = nn.LSTM(input_size=input_size, hidden_size=hidden_size)
-        self.attn_linear = nn.Linear(in_features = 2*hidden_size+2*T, out_features=1)
+        self.attn_linear = nn.Linear(in_features = 2*hidden_size+T, out_features=1)
 
     def forward(self, attr_inputs, context_embedding, input_variable):
         for attr in attr_inputs:
@@ -106,15 +106,14 @@ class encoder(nn.Module):
                 attr_embed = self.user_embedding(attr_input)
             if attr == "sport_input":
                 attr_embed = self.sport_embedding(attr_input)
-
             input_variable = torch.cat([attr_embed, input_variable], dim=-1)
 
         input_variable = torch.cat([context_embedding, input_variable], dim=-1)
 
         input_data = input_variable
 
-        input_weighted = torch.zeros(input_data.size(0), 2*self.T, self.input_size).to(device)
-        input_encoded = torch.zeros(input_data.size(0), 2*self.T, self.hidden_size).to(device)
+        input_weighted = torch.zeros(input_data.size(0), self.T, self.input_size).to(device)
+        input_encoded = torch.zeros(input_data.size(0), self.T, self.hidden_size).to(device)
         hidden = torch.zeros(1, input_data.size(0), self.hidden_size).to(device)
         cell = torch.zeros_like(hidden).to(device)
 
@@ -124,7 +123,7 @@ class encoder(nn.Module):
                            cell.repeat(self.input_size, 1, 1).permute(1, 0, 2),
                            input_data.permute(0, 2, 1)), dim=2)  # batch_size * input_size * (2*hidden_size + T)
             # Eqn 9: Get attention weights
-            x = self.attn_linear(x.view(-1, 2*self.hidden_size + 2*self.T))  # (batch_size * input_size) * 1
+            x = self.attn_linear(x.view(-1, 2*self.hidden_size + self.T))  # (batch_size * input_size) * 1
             attn_weights = F.softmax(x.view(-1, self.input_size), dim=-1)  # batch_size * input_size, attn weights sum up to 1
             # Eqn 10: LSTM
             weighted_input = torch.mul(attn_weights, input_data[:, t, :])  # batch_size * input_size
@@ -166,30 +165,29 @@ class decoder(nn.Module):
         for t in range(self.T):
             # Eqn 12-13: compute attention weights
             ## batch_size * T * (2*decoder_hidden_size + encoder_hidden_size)
-            x = torch.cat((hidden.repeat(2*self.T, 1, 1).permute(1, 0, 2),
-                           cell.repeat(2*self.T, 1, 1).permute(1, 0, 2), 
+            x = torch.cat((hidden.repeat(self.T, 1, 1).permute(1, 0, 2),
+                           cell.repeat(self.T, 1, 1).permute(1, 0, 2), 
                            input_encoded), dim=2)
-            x = F.softmax(self.attn_layer(x.view(-1, 2*self.decoder_hidden_size+self.encoder_hidden_size)).view(-1, 2*self.T), dim=-1)
+            x = F.softmax(self.attn_layer(x.view(-1, 2*self.decoder_hidden_size+self.encoder_hidden_size)).view(-1, self.T), dim=-1)
 
             # Eqn 14: compute context vector
             context = torch.bmm(x.unsqueeze(1), input_encoded)[:, 0, :]  # batch_size * encoder_hidden_size
 
-            # if t < self.T - 1:
-            # Eqn 15
-            y_tilde = self.fc(torch.cat((context, y_history[:, t].unsqueeze(1)), dim=1))  # batch_size * 1
+            if t < self.T:
+                # Eqn 15
+                y_tilde = self.fc(torch.cat((context, y_history[:, t].unsqueeze(1)), dim=1))  # batch_size * 1
 
-            # Eqn 16: LSTM
-            self.lstm_layer.flatten_parameters()
-            _, lstm_output = self.lstm_layer(y_tilde.unsqueeze(0), (hidden, cell))
-            hidden = lstm_output[0]  # 1 * batch_size * decoder_hidden_size
-            cell = lstm_output[1]  # 1 * batch_size * decoder_hidden_size
+                # Eqn 16: LSTM
+                self.lstm_layer.flatten_parameters()
+                _, lstm_output = self.lstm_layer(y_tilde.unsqueeze(0), (hidden, cell))
+                hidden = lstm_output[0]  # 1 * batch_size * decoder_hidden_size
+                cell = lstm_output[1]  # 1 * batch_size * decoder_hidden_size
 
         # Eqn 22: final output (hallelujah!)
         y_pred = self.fc_final(torch.cat((hidden[0], context), dim=1))
 
         # return y_pred.view(y_pred.size(0))
         return y_pred
-
 
 
 class sport_decoder(nn.Module):
@@ -201,7 +199,7 @@ class sport_decoder(nn.Module):
         self.T = T
         self.interim_hidden_size = 8
         
-        self.fc1 = nn.Linear(2*self.T*self.encoder_hidden_size, self.encoder_hidden_size)
+        self.fc1 = nn.Linear(self.T*self.encoder_hidden_size, self.encoder_hidden_size)
         self.fc2 = nn.Linear(self.encoder_hidden_size, self.interim_hidden_size)
         self.final_fc = nn.Linear(self.interim_hidden_size, 1)
         self.m = nn.ReLU()
@@ -225,7 +223,7 @@ class zone_decoder(nn.Module):
         self.T = T
         self.interim_hidden_size = 8
         
-        self.fc1 = nn.Linear(2*self.T*self.encoder_hidden_size, self.encoder_hidden_size)
+        self.fc1 = nn.Linear(self.T*self.encoder_hidden_size, self.encoder_hidden_size)
         self.fc2 = nn.Linear(self.encoder_hidden_size, self.interim_hidden_size)
         self.final_fc = nn.Linear(self.interim_hidden_size, 1)
         self.m = nn.ReLU()
@@ -244,7 +242,7 @@ class zone_decoder(nn.Module):
 class da_rnn:
     def __init__(self, encoder_hidden_size=64, decoder_hidden_size=64, 
                 T=10, learning_rate = 0.01, batch_size=5120, parallel=True, 
-                debug=False, test_model_path=None, predict_sport=False, 
+                debug=False, test_model_path=None, predict_sport=False,
                 predict_zone=False, checkpoint_dir='.', checkpoint_freq=5):
 
         self.T = T
@@ -260,7 +258,7 @@ class da_rnn:
         self.start_epoch = 0
         self.zMultiple = 5
 
-        self.checkpoint_path = f'{checkpoint_dir}/checkpoint.pt'
+        self.checkpoint_path = f'{checkpoint_dir}/checkpoint/pt'
         self.checkpoint_freq = checkpoint_freq
 
         self.predict_sport = predict_sport
@@ -276,10 +274,6 @@ class da_rnn:
             self.model_file_name.append("sport")
         if self.includeTemporal:
             self.model_file_name.append("context")
-        if self.predict_sport:
-            self.model_file_name.append("predict_sport")
-        if self.predict_zone:
-            self.model_file_name.append("predict_zone")
         print(self.model_file_name)
 
         self.user_dim = 5
@@ -289,7 +283,7 @@ class da_rnn:
         self.targetAtts = ['heart_rate']
         self.heartRateTarget = 0.84
         self.medianAge = 35
-        self.targetDuration = 12 * 60  # 12 minutes, in seconds
+        self.targetDuration = 12*60  # 12 minutes, in seconds
         self.inputAtts = ['derived_speed', 'altitude']
 
         self.trimmed_workout_len = 300
@@ -364,7 +358,7 @@ class da_rnn:
             self.decoder_sport = sport_decoder(encoder_hidden_size=encoder_hidden_size, T=T).to(device)
         if self.predict_zone:
             self.decoder_meetHRzone = zone_decoder(encoder_hidden_size=encoder_hidden_size, T=T).to(device)
-        
+
         if parallel:
             self.encoder = nn.DataParallel(self.encoder)
             self.context_encoder = nn.DataParallel(self.context_encoder)
@@ -391,7 +385,7 @@ class da_rnn:
         
         self.context_encoder_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder.parameters()), lr = learning_rate)
         self.decoder_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder.parameters()), lr = learning_rate)
-        self.loss_func = nn.MSELoss(reduction='mean')
+        self.loss_func = nn.MSELoss(size_average=True)
         if self.predict_sport:
             self.decoder_sport_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder_sport.parameters()), lr = 2*learning_rate, weight_decay=0.01)
             self.loss_func_sport = nn.BCELoss()
@@ -458,8 +452,8 @@ class da_rnn:
         self.best_val_loss = checkpoint['best_val_loss']
         self.best_epoch = checkpoint['best_epoch']
         self.start_epoch = checkpoint['epoch']
-    
-    
+
+
     # Prepare a provided batch from the data for use in training the FitRec-Attn Model
     def get_batch(self, batch):
 
@@ -479,13 +473,13 @@ class da_rnn:
             attr_input = torch.from_numpy(attr_input[keep_idx]).long().to(device)
 
             attr_inputs[attr] = attr_input
-        
+
         context_input_1 = torch.from_numpy(batch[0]['context_input_1'][keep_idx]).float().to(device)
         context_input_2 = torch.from_numpy(batch[0]['context_input_2'][keep_idx]).float().to(device)
 
         input_variable = torch.from_numpy(batch[0]['input'][keep_idx]).float().to(device)
         target_ts_variable = torch.from_numpy(batch[1][keep_idx]).float().to(device)
-        target_sport_variable = torch.where(torch.from_numpy(batch[2][keep_idx]) == 13, torch.ones(batch[2][keep_idx].shape), torch.zeros(batch[2][keep_idx].shape)).float().to(device)
+        target_sport_variable = torch.where(torch.from_numpy(batch[2][keep_idx])==13, torch.ones(batch[2][keep_idx].shape), torch.zeros(batch[2][keep_idx].shape)).float().to(device)
         target_meetHRzone_variable = torch.from_numpy(batch[3][keep_idx]).float().to(device)
 
         # TODO(TWK): This is where we can adjust how we predict the next K 
@@ -494,7 +488,7 @@ class da_rnn:
         # the time sequences are longer (T-1)+K...... We can also provide the 
         # sport as target for that secondary task.
         y_history = target_ts_variable[:, :self.T, :].squeeze(-1)
-        y_target = target_ts_variable[:, -self.T:, :].squeeze(-1)  # Convert to just pulling the the self.T steps into the "future"
+        y_target = target_ts_variable[:, self.T:, :].squeeze(-1)
 
         return attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, target_sport_variable, target_meetHRzone_variable
 
@@ -514,6 +508,9 @@ class da_rnn:
 
             epoch_start_time = time.time()
             start_time = time.time()
+
+            if iteration > 1:
+                import pdb; pdb.set_trace()
 
             # Train
             trainDataGen = self.endo_reader.generator_for_autotrain(self.batch_size, self.num_steps, "train")
@@ -688,7 +685,6 @@ class da_rnn:
 
         loss = 0
 
-
         context_embedding = self.context_encoder(context_input_1, context_input_2)
         input_weighted, input_encoded = self.encoder(attr_inputs, context_embedding, input_variable)
         y_pred = self.decoder(input_encoded, y_history)
@@ -723,7 +719,7 @@ class da_rnn:
 
         return return_losses
 
-    def evaluate(self, attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target):
+    def evaluate(self, attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, target_sport, target_zone):
         self.encoder.eval()
         self.context_encoder.eval()
         self.decoder.eval()
@@ -760,7 +756,7 @@ class da_rnn:
 
 
 def main(predict_sport=False, predict_zone=False, checkpoint_dir='.'):
-    learning_rate = 0.05
+    learning_rate = 0.005
     batch_size = 5120
     # batch_size = 10240
     # batch_size = 12800 # Gigantic batch size... Needs to be farmed across GPUs...
@@ -768,7 +764,7 @@ def main(predict_sport=False, predict_zone=False, checkpoint_dir='.'):
     # T = 20
     T=10
     print("learning_rate = {}, batch_size = {}, hidden_size = {}, T = {}".format(learning_rate, batch_size, hidden_size, T))
-    model = da_rnn(parallel=False, T=T, encoder_hidden_size=hidden_size, 
+    model = da_rnn(parallel=True, T=T, encoder_hidden_size=hidden_size, 
         decoder_hidden_size=hidden_size, learning_rate=learning_rate, 
         batch_size=batch_size, predict_sport=predict_sport, 
         predict_zone=predict_zone, checkpoint_dir=checkpoint_dir)
@@ -779,11 +775,9 @@ def main(predict_sport=False, predict_zone=False, checkpoint_dir='.'):
     plt.figure()
     plt.semilogy(range(len(model.iter_losses)), model.iter_losses)
     plt.show()
-
     plt.figure()
     plt.semilogy(range(len(model.epoch_losses)), model.epoch_losses)
     plt.show()
-
     plt.figure()
     plt.plot(y_pred, label='Predicted')
     plt.plot(model.y[model.train_size:], label="True")
