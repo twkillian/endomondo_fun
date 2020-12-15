@@ -1,0 +1,19 @@
+#!/bin/bash
+#SBATCH -n 1 # Number of cores requested
+#SBATCH -N 1 # All cores on a single node
+#SBATCH --gres=gpu:1
+#SBATCH -p gpu # Partition to submit to
+#SBATCH -c 2 # Number of cpus requested
+#SBATCH --output OUTPUTS/mt_fitrec-%j-%a.out
+#SBATCH --mem=64GB
+#SBATCH --mail-user=twkillian@cs.toronto.edu
+#SBATCH --mail-type=BEGIN
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --array=1-4
+
+source /h/tkillian/envs/csc2515.env
+
+echo $(tail -n+$SLURM_ARRAY_TASK_ID mt_exps.txt | head -n1)
+
+python -u fitrec_attn.py $(tail -n+$SLURM_ARRAY_TASK_ID mt_exps.txt | head -n1) --checkpoint_dir checkpoint/${USER}/${SLURM_JOB_ID}

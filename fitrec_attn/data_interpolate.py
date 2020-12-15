@@ -50,10 +50,15 @@ def process(line):
     return eval(line)
 
 class dataInterpreter(object):
-    def __init__(self, T, inputAtts, includeUser, includeSport, includeTemporal, targetAtts, targetHRZone, medianAge, targetDuration, fn="endomondoHR_proper.json", scaleVals=True, trimmed_workout_len=450, scaleTargets="scaleVals", trainValidTestSplit=[.8,.1,.1], zMultiple=5, trainValidTestFN=None):
+    def __init__(self, T, inputAtts, includeUser, includeSport, includeTemporal, targetAtts, 
+        targetHRZone, medianAge, targetDuration, fn="endomondoHR_proper.json", scaleVals=True, 
+        trimmed_workout_len=450, scaleTargets="scaleVals", trainValidTestSplit=[.8,.1,.1], 
+        zMultiple=5, trainValidTestFN=None):
+
         self.T = T
         self.filename = fn
         self.data_path = "../data"
+        # self.data_path = "/scratch/ssd001/home/tkillian/fitrec/data"
         self.metaDataFn = fn.split(".")[0] + "_metaData.pkl"
 
         self.scaleVals = scaleVals
