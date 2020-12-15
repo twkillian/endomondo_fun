@@ -140,19 +140,26 @@ class encoder(nn.Module):
 
 class decoder(nn.Module):
     """Decode the embedded hidden state to predict the next time window"""
-    def __init__(self, encoder_hidden_size, decoder_hidden_size, T):
+    def __init__(self, encoder_hidden_size, decoder_hidden_size, T, predict_sport=False, predict_zone=False):
         super(decoder, self).__init__()
 
         self.T = T
         self.encoder_hidden_size = encoder_hidden_size
         self.decoder_hidden_size = decoder_hidden_size
+        self.predict_sport = predict_sport
+        self.predict_zone = predict_zone
+
+        self.q = nn.Sigmoid()
 
         self.attn_layer = nn.Sequential(nn.Linear(2*decoder_hidden_size + encoder_hidden_size, encoder_hidden_size),
                                         nn.Tanh(),
                                         nn.Linear(encoder_hidden_size, 1))  # Here the last layer is trying to predict the next time step
         self.lstm_layer = nn.LSTM(input_size=1, hidden_size=decoder_hidden_size)
         self.fc = nn.Linear(encoder_hidden_size+1, 1)
-        self.fc_final = nn.Linear(decoder_hidden_size + encoder_hidden_size, T)  # Final prediction of the next time window
+        if self.predict_sport or self.predict_zone:
+            self.fc_final = nn.Linear(decoder_hidden_size+encoder_hidden_size, 1)  # Output for binary prediction task
+        else:
+            self.fc_final = nn.Linear(decoder_hidden_size + encoder_hidden_size, T)  # Final prediction of the next time window
 
         self.fc.weight.data.normal_()
 
@@ -184,66 +191,21 @@ class decoder(nn.Module):
                 cell = lstm_output[1]  # 1 * batch_size * decoder_hidden_size
 
         # Eqn 22: final output (hallelujah!)
-        y_pred = self.fc_final(torch.cat((hidden[0], context), dim=1))
+        if self.predict_sport or self.predict_zone:
+            y_pred = self.q(self.fc_final(torch.cat((hidden[0], context), dim=1))).squeeze(-1)
+        else:
+            y_pred = self.fc_final(torch.cat((hidden[0], context), dim=1))
 
         # return y_pred.view(y_pred.size(0))
         return y_pred
-
-
-# class sport_decoder(nn.Module):
-#     """Using the embedded hidden state, predict the sport"""
-#     def __init__(self, encoder_hidden_size, T):
-#         super(sport_decoder, self).__init__()
-
-#         self.encoder_hidden_size = encoder_hidden_size
-#         self.T = T
-#         self.interim_hidden_size = 8
-        
-#         self.fc1 = nn.Linear(self.T*self.encoder_hidden_size, self.encoder_hidden_size)
-#         self.fc2 = nn.Linear(self.encoder_hidden_size, self.interim_hidden_size)
-#         self.final_fc = nn.Linear(self.interim_hidden_size, 1)
-#         self.m = nn.ReLU()
-#         self.q = nn.Sigmoid()
-
-#     def forward(self, input_encoded):
-
-#         hidden = self.m(self.fc1(input_encoded))
-#         interim = self.m(self.fc2(hidden))
-#         output = self.q(self.final_fc(interim))
-
-#         return output
-
-
-# class zone_decoder(nn.Module):
-#     """Using the embedded hidden state, predict whether user hits their target HR zone"""
-#     def __init__(self, encoder_hidden_size, T):
-#         super(zone_decoder, self).__init__()
-
-#         self.encoder_hidden_size = encoder_hidden_size
-#         self.T = T
-#         self.interim_hidden_size = 8
-        
-#         self.fc1 = nn.Linear(self.T*self.encoder_hidden_size, self.encoder_hidden_size)
-#         self.fc2 = nn.Linear(self.encoder_hidden_size, self.interim_hidden_size)
-#         self.final_fc = nn.Linear(self.interim_hidden_size, 1)
-#         self.m = nn.ReLU()
-#         self.q = nn.Sigmoid()
-
-#     def forward(self, input_encoded):
-
-#         hidden = self.m(self.fc1(input_encoded))
-#         interim = self.m(self.fc2(hidden))
-#         output = self.q(self.final_fc(interim))
-
-#         return output
 
 
 ## PUT ALL THESE PIECES TOGETHER TO FORM THE FITREC-ATTN MODEL
 class da_rnn:
     def __init__(self, encoder_hidden_size=64, decoder_hidden_size=64, 
                 T=10, learning_rate = 0.01, batch_size=5120, parallel=True, 
-                debug=False, test_model_path=None, predict_sport=False,
-                predict_zone=False, checkpoint_dir='.', checkpoint_freq=5):
+                predict_sport = False, predict_zone = False, debug=False, 
+                test_model_path=None, checkpoint_dir='.', checkpoint_freq=5):
 
         self.T = T
         self.batch_size = batch_size
@@ -274,6 +236,10 @@ class da_rnn:
             self.model_file_name.append("sport")
         if self.includeTemporal:
             self.model_file_name.append("context")
+        if self.predict_sport:
+            self.model_file_name.append("predictSport")
+        if self.predict_zone:
+            self.model_file_name.append("predictZone")
         print(self.model_file_name)
 
         self.user_dim = 5
@@ -353,20 +319,13 @@ class da_rnn:
         self.encoder = encoder(input_size=self.input_size, hidden_size=encoder_hidden_size, T=T,
                                attr_embeddings=self.attr_embeddings).to(device)
         self.decoder = decoder(encoder_hidden_size=encoder_hidden_size,
-                               decoder_hidden_size=decoder_hidden_size, T=T).to(device)
-        # if self.predict_sport:
-        #     self.decoder_sport = sport_decoder(encoder_hidden_size=encoder_hidden_size, T=T).to(device)
-        # if self.predict_zone:
-        #     self.decoder_meetHRzone = zone_decoder(encoder_hidden_size=encoder_hidden_size, T=T).to(device)
+                               decoder_hidden_size=decoder_hidden_size, T=T, 
+                               predict_sport=self.predict_sport, predict_zone=self.predict_zone).to(device)
 
         if parallel:
             self.encoder = nn.DataParallel(self.encoder)
             self.context_encoder = nn.DataParallel(self.context_encoder)
             self.decoder = nn.DataParallel(self.decoder)
-            # if self.predict_sport:
-            #     self.decoder_sport = nn.DataParallel(self.decoder_sport)
-            # if self.predict_zone:
-            #     self.decoder_meetHRzone = nn.DataParallel(self.decoder_meetHRzone)
 
 
         wd1 = 0.002
@@ -385,13 +344,10 @@ class da_rnn:
         
         self.context_encoder_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder.parameters()), lr = learning_rate)
         self.decoder_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder.parameters()), lr = learning_rate)
-        self.loss_func = nn.MSELoss()
-        # if self.predict_sport:
-        #     self.decoder_sport_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder_sport.parameters()), lr = 0.5*learning_rate, weight_decay=0.01)
-        #     self.loss_func_sport = nn.BCELoss()
-        # if self.predict_zone:
-        #     self.decoder_meetHRzone_optimizer = optim.Adam(params=filter(lambda p: p.requires_grad, self.decoder_meetHRzone.parameters()), lr = 0.5*learning_rate, weight_decay=0.01)
-        #     self.loss_func_meetHRzone = nn.BCELoss()
+        if self.predict_sport or self.predict_zone:
+            self.loss_func = nn.BCELoss()
+        else:
+            self.loss_func = nn.MSELoss()
 
         if os.path.exists(self.checkpoint_path):
             self.checkpoint_load()
@@ -401,10 +357,6 @@ class da_rnn:
             self.encoder.load_state_dict(checkpoint['en'])
             self.context_encoder.load_state_dict(checkpoint['context_en'])
             self.decoder.load_state_dict(checkpoint['de'])
-            # if predict_sport:
-            #     self.decoder_sport.load_state_dict(checkpoint['de_sport'])
-            # if predict_zone:
-            #     self.decoder_meetHRzone.load_state_dict(checkpoint['de_zone'])
             print("test model: {}".format(test_model_path))
 
     def save_checkpoint(self, iteration):
@@ -424,12 +376,6 @@ class da_rnn:
             'best_val_loss': self.best_val_loss,
             'best_epoch': self.best_epoch
             }
-        # if self.predict_sport:
-        #     save_dict['de_sport'] = self.decoder_sport.state_dict()
-        #     save_dict['de_sport_opt'] = self.decoder_sport_optimizer.state_dict()
-        # if self.predict_zone:
-        #     save_dict['de_zone'] = self.decoder_meetHRzone.state_dict()
-        #     save_dict['de_zone_opt'] = self.decoder_meetHRzone_optimizer.state_dict()
         torch.save(save_dict, self.checkpoint_path)
 
 
@@ -442,22 +388,15 @@ class da_rnn:
         self.context_encoder_optimizer.load_state_dict(checkpoint['context_en_opt'])
         self.encoder_optimizer.load_state_dict(checkpoint['en_opt'])
         self.decoder_optimizer.load_state_dict(checkpoint['de_opt'])
-        # if predict_sport:
-        #     self.decoder_sport.load_state_dict(checkpoint['de_sport'])
-        #     self.decoder_sport_optimizer.load_state_dict(checkpoint['de_sport_opt'])
-        # if predict_zone:
-        #     self.decoder_meetHRzone.load_state_dict(checkpoint['de_zone'])
-        #     self.decoder_meetHRzone.load_state_dict(checkpoint['de_zone_opt'])
 
         self.best_val_loss = checkpoint['best_val_loss']
         self.best_epoch = checkpoint['best_epoch']
         self.start_epoch = checkpoint['epoch']
 
-
     # Prepare a provided batch from the data for use in training the FitRec-Attn Model
     def get_batch(self, batch):
 
-        # Filter out all non-biking (idx=13) and non-running (idx=42) activities
+        # Filter out all non-biking (idx=-13) and non-running (idx=42) activiites
         keep_idx = (batch[2].flatten()==13)|(batch[2].flatten()==42)
 
         attr_inputs = {}
@@ -479,8 +418,9 @@ class da_rnn:
 
         input_variable = torch.from_numpy(batch[0]['input'][keep_idx]).float().to(device)
         target_ts_variable = torch.from_numpy(batch[1][keep_idx]).float().to(device)
-        # target_sport_variable = torch.where(torch.from_numpy(batch[2][keep_idx])==13, torch.ones(batch[2][keep_idx].shape), torch.zeros(batch[2][keep_idx].shape)).float().to(device)
-        # target_meetHRzone_variable = torch.from_numpy(batch[3][keep_idx]).float().to(device)
+
+        target_sport_variable = torch.where(torch.from_numpy(batch[2][keep_idx]) == 13, torch.ones(batch[2][keep_idx].shape), torch.zeros(batch[2][keep_idx].shape)).float().to(device)
+        target_meetHRzone_variable = torch.from_numpy(batch[3][keep_idx]).float().to(device)
 
         # TODO(TWK): This is where we can adjust how we predict the next K 
         # timesteps by adjusting the target variable. What needs to be done 
@@ -488,9 +428,14 @@ class da_rnn:
         # the time sequences are longer (T-1)+K...... We can also provide the 
         # sport as target for that secondary task.
         y_history = target_ts_variable[:, :self.T, :].squeeze(-1)
-        y_target = target_ts_variable[:, self.T:, :].squeeze(-1)
+        if self.predict_sport:
+            y_target = target_sport_variable.squeeze(-1)
+        elif self.predict_zone:
+            y_target = target_meetHRzone_variable.squeeze(-1)
+        else:
+            y_target = target_ts_variable[:, self.T:, :].squeeze(-1)
+        
 
-        # return attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, target_sport_variable, target_meetHRzone_variable
         return attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target
 
 
@@ -498,11 +443,13 @@ class da_rnn:
 
         # Initialize
         print('Initializing...')
-        self.best_val_loss = None
+        start_epoch = 0
+        best_val_loss = None
         best_epoch_path = None
-        self.best_epoch = 0
+        best_valid_score = 9999999999
+        best_epoch = 0
 
-        for iteration in range(self.start_epoch, n_epochs):
+        for iteration in range(n_epochs):
             print('\n')
             print('-'*50)
             print('Iteration', iteration)
@@ -510,58 +457,30 @@ class da_rnn:
             epoch_start_time = time.time()
             start_time = time.time()
 
-            if iteration > 2:
+            if iteration > 1:
                 import pdb; pdb.set_trace()
 
             # Train
             trainDataGen = self.endo_reader.generator_for_autotrain(self.batch_size, self.num_steps, "train")
             print_loss = 0
-            # hr_losses = 0
-            # sport_losses = 0
-            # zone_losses = 0
             for batch, training_batch in enumerate(trainDataGen):
-                # attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, sport_target, zone_target = self.get_batch(training_batch)
                 attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target = self.get_batch(training_batch)
-                # losses = self.train_iteration(attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, sport_target, zone_target)
-                losses = self.train_iteration(attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target)
-                # if self.predict_sport and self.predict_zone:
-                #     loss, hr_loss, sport_loss, zone_loss = (*losses,)
-                #     sport_losses += sport_loss
-                #     zone_losses += zone_loss
-                # elif self.predict_sport:
-                #     loss, hr_loss, sport_loss = (*losses,)
-                #     sport_losses += sport_loss
-                # elif self.predict_zone:
-                #     loss, hr_loss, zone_loss = (*losses,)
-                #     zone_losses += zone_loss
-                # else:
-                #     loss, hr_loss = (*losses,)
+                if context_input_1.shape[0] < 10:
+                    continue
+                    
+                loss = self.train_iteration(attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target)
 
                 print_loss += loss
-                # hr_losses += hr_loss
                 if batch % print_every == 0 and batch > 0:
-                    cur_loss = print_loss / print_every
-                    # cur_hr_loss = hr_losses / print_every
+                    cur_loss = print_loss / print_every 
                     elapsed = time.time() - start_time
-                    # print_string = '| epoch {:3d} | {:5d} batches | lr {:05.5f} | ms/batch {:5.2f} | loss {:5.3f} | hr_loss {:5.3f}'.format(
-                    #       iteration, batch, self.learning_rate,
-                    #       elapsed * 1000 / print_every, cur_loss, cur_hr_loss)
-                    print_string = '| epoch {:3d} | {:5d} batches | lr {:05.5f} | ms/batch {:5.2f} | loss {:5.3f} '.format(
-                          iteration, batch, self.learning_rate,
-                          elapsed * 1000 / print_every, cur_loss)
-                    # if self.predict_sport:
-                    #     cur_sport_loss = sport_losses / print_every
-                    #     print_string += ' | sport_loss {:5.3f}'.format(cur_sport_loss)
-                    # if self.predict_zone:
-                    #     cur_zone_loss = zone_losses / print_every
-                    #     print_string += ' | zone_loss {:5.3f}'.format(cur_zone_loss)
 
-                    print(print_string)
+                    print('| epoch {:3d} | {:5d} batches | lr {:05.5f} | ms/batch {:5.2f} | '
+                          'loss {:5.3f}'.format(
+                          iteration, batch, self.learning_rate,
+                          elapsed * 1000 / print_every, cur_loss))
                     
                     print_loss = 0
-                    # hr_losses = 0
-                    # sport_losses = 0
-                    # zone_losses = 0
                     start_time = time.time()
 
             # Evaluate
@@ -571,25 +490,23 @@ class da_rnn:
             for val_batch in validDataGen:
                 val_batch_num += 1
 
-                # attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, sport_target, zone_target = self.get_batch(val_batch)
                 attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target = self.get_batch(val_batch)
-                # losses = self.evaluate(attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, sport_target, zone_target)
+                if context_input_1.shape[0] < 10:
+                    val_batch_num -= 1
+                    continue
                 loss = self.evaluate(attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target)
-
-                # loss = losses[0]
 
                 val_loss += loss
             val_loss /= val_batch_num
             print('-'*89)
-            if not self.best_val_loss or val_loss <= self.best_val_loss:
-                self.best_val_loss = val_loss
-                self.best_epoch = iteration
+            if not best_val_loss or val_loss <= best_val_loss:
+                best_val_loss = val_loss
+                best_epoch = iteration
                 best_epoch_path = self.model_save_location+self.model_file_name+"_best"
 
                 if not os.path.exists(self.model_save_location):
                     os.makedirs(self.model_save_location)
-
-                save_dict = {
+                torch.save({
                     'epoch': iteration,
                     'en': self.encoder.state_dict(),
                     'context_en': self.context_encoder.state_dict(),
@@ -597,20 +514,8 @@ class da_rnn:
                     'en_opt': self.encoder_optimizer.state_dict(),
                     'context_en_opt': self.context_encoder_optimizer.state_dict(),
                     'de_opt': self.decoder_optimizer.state_dict(),
-                    'loss': loss,
-                    'best_val_loss': self.best_val_loss,
-                    'best_epoch': self.best_epoch,
-                    }
-                # if self.predict_sport:
-                #     save_dict['de_sport'] = self.decoder_sport.state_dict()
-                #     save_dict['de_sport_opt'] = self.decoder_sport_optimizer.state_dict()
-                # if self.predict_zone:
-                #     save_dict['de_zone'] = self.decoder_meetHRzone.state_dict()
-                #     save_dict['de_zone_opt'] = self.decoder_meetHRzone_optimizer.state_dict()
-                torch.save(save_dict, best_epoch_path)
-
-            if iteration % self.checkpoint_freq:
-                self.save_checkpoint(iteration)
+                    'loss': loss
+                    }, best_epoch_path)
 
             elif (iteration - best_epoch < self.patience):
                 pass
@@ -624,166 +529,83 @@ class da_rnn:
             self.encoder.load_state_dict(checkpoint['en'])
             self.context_encoder.load_state_dict(checkpoint['context_en'])
             self.decoder.load_state_dict(checkpoint['de'])
-            # if predict_sport:
-            #     self.decoder_sport.load_state_dict(checkpoint['de_sport'])
-            # if predict_zone:
-            #     self.decoder_meetHRzone.load_state_dict(checkpoint['de_zone'])
         print("best model: {}".format(best_epoch_path))
 
         # test
         testDataGen = self.endo_reader.generator_for_autotrain(self.batch_size, self.num_steps, "test")
         test_loss = 0
-        # test_hr_loss = 0
-        # test_sport_loss = 0
-        # test_zone_loss = 0
         test_batch_num = 0
 
         for test_batch in testDataGen:
             test_batch_num += 1
             
-            # attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, sport_target, zone_target = self.get_batch(test_batch)
             attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target = self.get_batch(test_batch)
-            # losses = self.evaluate(attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target, sport_target, zone_target)
+            if context_input_1.shape[0] < 10:
+                test_batch_num -= 1
+                continue
             loss = self.evaluate(attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target)
-            # if self.predict_sport and self.predict_zone:
-            #     loss, hr_loss, sport_loss, zone_loss = (*losses,)
-            #     test_sport_loss += sport_loss
-            #     test_zone_loss += zone_loss
-            # elif self.predict_sport:
-            #     loss, hr_loss, sport_loss = (*losses,)
-            #     test_sport_loss += sport_loss
-            # elif self.predict_zone:
-            #     loss, hr_loss, zone_loss = (*losses,)
-            #     test_zone_loss += zone_loss
-            # else:
-            #     loss, hr_loss = (*losses,)
+
             test_loss += loss
-            # test_hr_loss += hr_loss
         test_loss /= test_batch_num
-        # test_hr_loss /= test_batch_num
-        # test_sport_loss /= test_sport_loss
-        # test_zone_loss /= test_zone_loss
-        # print_string = '| test loss {:5.3f} | test hr_loss {:5.3f}'.format(test_loss, test_hr_loss)
-        print_string = '| test loss {:5.3f}'.format(test_loss)
-        # if self.predict_sport:
-        #     print_string += ' | test sport_loss {:5.3f}'.format(test_sport_loss)
-        # if self.predict_zone:
-        #     print_string += ' | test zone_loss {:5.3f}'.format(test_zone_loss)
         print('-'*89)
-        print(print_string)
+        print('| test loss {:5.3f}'.format(test_loss))
         print('-'*89)
 
     #################################################################
     ###  FULL MODEL TRAINING, EVALUATION AND PREDICTION METHODS
     #################################################################
-    def train_iteration(self, attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target):#, target_sport, target_zone):
+    def train_iteration(self, attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target):
         '''TODO: UPDATE AND AUGMENT THIS TO EITHER 1) PREDICT K steps forward OR 2) PREDICT Sport category'''
         self.encoder.train()
         self.context_encoder.train()
         self.decoder.train()
-        # if self.predict_sport:
-        #     self.decoder_sport.train()
-        # if self.predict_zone:
-        #     self.decoder_meetHRzone.train()
 
         self.encoder_optimizer.zero_grad()
         self.context_encoder_optimizer.zero_grad()
         self.decoder_optimizer.zero_grad()
-        # if self.predict_sport:
-        #     self.decoder_sport_optimizer.zero_grad()
-        # if self.predict_zone:
-        #     self.decoder_meetHRzone_optimizer.zero_grad()
-
-        # loss = 0
 
         context_embedding = self.context_encoder(context_input_1, context_input_2)
         input_weighted, input_encoded = self.encoder(attr_inputs, context_embedding, input_variable)
         y_pred = self.decoder(input_encoded, y_history)
-        hr_loss = self.loss_func(y_pred, y_target)
-        # loss += hr_loss
 
-        # if self.predict_sport:
-        #     pred_sport = self.decoder_sport(input_encoded.view(input_encoded.shape[0],-1))
-        #     sport_loss = self.loss_func_sport(pred_sport, target_sport)
-        #     loss += sport_loss
-
-        # if self.predict_zone:
-        #     pred_zone = self.decoder_meetHRzone(input_encoded.view(input_encoded.shape[0],-1))
-        #     zone_loss = self.loss_func_meetHRzone(pred_zone, target_zone)
-        #     loss += zone_loss
-
-        # loss.backward()
-        hr_loss.backward()
+        # TODO(TWK): The following change slightly depending on how we update the prediciton task.
+        loss = self.loss_func(y_pred, y_target)
+        loss.backward()
 
         self.encoder_optimizer.step()
         self.context_encoder_optimizer.step()
         self.decoder_optimizer.step()
-        # if self.predict_sport:
-        #     self.decoder_sport_optimizer.step()
-        # if self.predict_zone:
-        #     self.decoder_meetHRzone_optimizer.step()
 
-        # return_losses = [loss.detach().item(), hr_loss.detach().item()]
-        # if self.predict_sport:
-        #     return_losses += [sport_loss.detach().item()]
-        # if self.predict_zone:
-        #     return_losses += [zone_loss.detach().item()]
+        return loss.detach().item()
 
-        # return return_losses
-        return hr_loss.detach().item()
-
-    def evaluate(self, attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target):#, target_sport, target_zone):
+    def evaluate(self, attr_inputs, context_input_1, context_input_2, input_variable, y_history, y_target):
         self.encoder.eval()
         self.context_encoder.eval()
         self.decoder.eval()
-        # if self.predict_sport:
-        #     self.decoder_sport.eval()
-        # if self.predict_zone:
-        #     self.decoder_meetHRzone.eval()
-
-        loss = 0
 
         context_embedding = self.context_encoder(context_input_1, context_input_2)
         input_weighted, input_encoded = self.encoder(attr_inputs, context_embedding, input_variable)
         y_pred = self.decoder(input_encoded, y_history)
-        hr_loss = self.loss_func(y_pred, y_target)
-        # loss += hr_loss
 
-        # if self.predict_sport:
-        #     pred_sport = self.decoder_sport(input_encoded)
-        #     sport_loss = self.loss_func_sport(pred_sport, target_sport)
-        #     loss += sport_loss
+        # TODO(TWK): The following change slightly depending on how we update the prediciton task.
+        loss = self.loss_func(y_pred, y_target)
 
-        # if self.predict_zone:
-        #     pred_zone = self.decoder_meetHRzone(input_encoded)
-        #     zone_loss = self.loss_func_meetHRzone(pred_zone, target_zone)
-        #     loss += zone_loss
-
-        # return_losses = [loss.detach().item(), hr_loss.detach().item()]
-        # if self.predict_sport:
-        #     return_losses += [sport_loss.detach().item()]
-        # if self.predict_zone:
-        #     return_losses += [zone_loss.detach().item()]
-
-        return hr_loss.detach().item()
+        return loss.detach().item()
 
 
 def main(predict_sport=False, predict_zone=False, checkpoint_dir='.'):
     learning_rate = 0.005
-    # batch_size = 5120
-    batch_size = 10240
+    batch_size = 5120
+    # batch_size = 10240
     # batch_size = 12800 # Gigantic batch size... Needs to be farmed across GPUs...
     hidden_size = 64
     # T = 20
     T=10
     print("learning_rate = {}, batch_size = {}, hidden_size = {}, T = {}".format(learning_rate, batch_size, hidden_size, T))
-    # model = da_rnn(parallel=True, T=T, encoder_hidden_size=hidden_size, 
-    #     decoder_hidden_size=hidden_size, learning_rate=learning_rate, 
-    #     batch_size=batch_size, predict_sport=predict_sport, 
-    #     predict_zone=predict_zone, checkpoint_dir=checkpoint_dir)
-    model = da_rnn(parallel=False, T=T, encoder_hidden_size=hidden_size, 
+    model = da_rnn(parallel=True, T=T, encoder_hidden_size=hidden_size, 
         decoder_hidden_size=hidden_size, learning_rate=learning_rate, 
-        batch_size=batch_size)
+        batch_size=batch_size, predict_sport=predict_sport, 
+        predict_zone=predict_zone, checkpoint_dir=checkpoint_dir)
 
     model.train(n_epochs=50)
 
@@ -802,12 +624,11 @@ def main(predict_sport=False, predict_zone=False, checkpoint_dir='.'):
     '''
 
 if __name__ == '__main__':
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('--predict_sport', dest='predict_sport', action='store_true')
-    # parser.add_argument('--predict_zone', dest='predict_zone', action='store_true')
-    # parser.add_argument('--baseline', dest='baseline', action='store_true')
-    # parser.add_argument('--checkpoint_dir', dest='checkpoint_dir', type=str, default = '.', help = 'Checkpoint directory')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--predict_sport', dest='predict_sport', action='store_true')
+    parser.add_argument('--predict_zone', dest='predict_zone', action='store_true')
+    parser.add_argument('--baseline', dest='baseline', action='store_true')
+    parser.add_argument('--checkpoint_dir', dest='checkpoint_dir', type=str, default = '.', help = 'Checkpoint directory')
 
-    # args = parser.parse_args()
-    # main(predict_sport=args.predict_sport, predict_zone=args.predict_zone, checkpoint_dir=args.checkpoint_dir)
-    main()
+    args = parser.parse_args()
+    main(predict_sport=args.predict_sport, predict_zone=args.predict_zone, checkpoint_dir=args.checkpoint_dir)
