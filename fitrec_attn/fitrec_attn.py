@@ -457,9 +457,6 @@ class da_rnn:
             epoch_start_time = time.time()
             start_time = time.time()
 
-            if iteration > 1:
-                import pdb; pdb.set_trace()
-
             # Train
             trainDataGen = self.endo_reader.generator_for_autotrain(self.batch_size, self.num_steps, "train")
             print_loss = 0
@@ -595,8 +592,8 @@ class da_rnn:
 
 def main(predict_sport=False, predict_zone=False, checkpoint_dir='.'):
     learning_rate = 0.005
-    batch_size = 5120
-    # batch_size = 10240
+    # batch_size = 5120
+    batch_size = 10240
     # batch_size = 12800 # Gigantic batch size... Needs to be farmed across GPUs...
     hidden_size = 64
     # T = 20
@@ -608,20 +605,7 @@ def main(predict_sport=False, predict_zone=False, checkpoint_dir='.'):
         predict_zone=predict_zone, checkpoint_dir=checkpoint_dir)
 
     model.train(n_epochs=50)
-
-    '''
-    plt.figure()
-    plt.semilogy(range(len(model.iter_losses)), model.iter_losses)
-    plt.show()
-    plt.figure()
-    plt.semilogy(range(len(model.epoch_losses)), model.epoch_losses)
-    plt.show()
-    plt.figure()
-    plt.plot(y_pred, label='Predicted')
-    plt.plot(model.y[model.train_size:], label="True")
-    plt.legend(loc='upper left')
-    plt.show()
-    '''
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
