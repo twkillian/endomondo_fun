@@ -8,17 +8,18 @@ temporal_pickle_filename = 'endomondoHR_proper_temporal_dataset.pkl'
 metadata_pickle_filename = 'endomondoHR_proper_metaData.pkl'
 
 class TSData(Dataset):
-    def __init__(self, x, y):
+    def __init__(self, x, y, step=1):
         super(TSData, self).__init__()
         self.x = x
         self.y = y
+        self.step = step
         
         assert self.x.shape[0] == self.y.shape[0]
         assert self.x.shape[-1] == self.y.shape[-1]
     
     def __getitem__(self, i):
         n = self.x.shape[2]
-        return self.x[i,:,:n-1], self.y[i,:,1:]
+        return self.x[i,:,:n-self.step], self.y[i,:,self.step:]
     
     def __len__(self):
         return self.x.shape[0]

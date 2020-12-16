@@ -10,7 +10,7 @@ def load_data(args):
     train_idx, val_idx, test_idx = map_data(train_idx, val_idx, test_idx, context, raw_data)
     
     if args.task == 'forecasting':
-        dataset = TSData(x_data, y_data)
+        dataset = TSData(x_data, y_data, args.step)
     elif args.task == 'prediction':
         dataset = ClassData(x_data, y_data)
     

@@ -11,6 +11,7 @@ def setup_parser():
     parser.add_argument('--x_vals', nargs='+', type=str, default=None, help='Name of input values used to train model')
     parser.add_argument('--y_vals', nargs='+', type=str, default=None, help='Name of output values used to train model')
     parser.add_argument('--n_output_vals', type=int, default=1, help='Number of values for y values (only used for prediction task)')
+    parser.add_argument('--step', type=int, default=1, help='Number of steps ahead to predict')
     parser.add_argument('--model', choices=['cnn', 'tcn'], default = 'tcn', help = 'Model architecture to use for training')
     parser.add_argument('--n_hidden', type=int, default = 32)
     parser.add_argument('--n_blocks', type=int, default=8, help='# of temporal blocks (default: 4)')
