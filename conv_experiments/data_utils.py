@@ -54,11 +54,30 @@ def map_data(train_idx, val_idx, test_idx, context, npy_data):
     
     return train_idx, val_idx, test_idx
 
+def get_hr_zone_targets(raw_data, y):
+    heartRateTarget = 0.84*(220-35)
+    
+    workout_hr = y
+    workout_timestamps = np.array(list(map(lambda x: [x['timestamp']], raw_data)))
+    diffs = np.diff(1*np.insert(workout_hr >= heartRateTarget, 0, 0)).reshape(*workout_hr.shape)
+    targetDuration = 12
+    targets = []
+    for i in range(y.shape[0]):
+        starts = workout_timestamps[i][0][diffs[i][0]==1]
+        ends = workout_timestamps[i][0][np.roll(diffs[i][0], -1)==-1]
+
+        min_contiguous = min(len(starts), len(ends))  # Align the starts and ends
+        deltas = ends[:min_contiguous] - starts[:min_contiguous]  # Calc the number of seconds in target HR zone
+
+        target_meets_zone = 1*(sum(deltas)>=targetDuration)
+        targets.append(target_meets_zone)
+    
+    targets = np.array(targets).reshape(*targets.shape, 1)
+    return targets
+
 def get_npy_data(args):
     raw_data = np.load(f'{args.dataset_path}/{npy_filename}', allow_pickle=True)[0]
-    
-    if args.task == 'prediction' and 'sport' in args.x_vals:
-        raw_data = np.array([w for w in raw_data if w['sport'] in ['bike', 'run']])
+    raw_data = np.array([w for w in raw_data if w['sport'] in ['bike', 'run']])
     
     input = np.array(list(map(lambda x: [x[col] for col in args.x_vals], raw_data)))
     y = np.array(list(map(lambda x: [x[col] for col in args.y_vals], raw_data)))
@@ -70,6 +89,10 @@ def get_npy_data(args):
         
     elif args.task == 'prediction' and 'sport' in args.y_vals:
         tensor_y = torch.from_numpy(np.array([1. if 'run' in sport else 0. for sport in y.flatten()])).reshape(*y.shape)
+        
+    elif args.task == 'prediction' and 'heart_rate' in args.y_vals:
+        y = get_hr_zone_targets(raw_data, y)
+        tensor_y = torch.from_numpy(y).float()
     
     else:
         raise NotImplementedError
