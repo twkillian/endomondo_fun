@@ -72,7 +72,7 @@ def get_hr_zone_targets(raw_data, y):
         target_meets_zone = 1*(sum(deltas)>=targetDuration)
         targets.append(target_meets_zone)
     
-    targets = np.array(targets).reshape(*targets.shape, 1)
+    targets = np.array(targets).reshape(len(targets), 1)
     return targets
 
 def get_npy_data(args):
@@ -90,7 +90,7 @@ def get_npy_data(args):
     elif args.task == 'prediction' and 'sport' in args.y_vals:
         tensor_y = torch.from_numpy(np.array([1. if 'run' in sport else 0. for sport in y.flatten()])).reshape(*y.shape)
         
-    elif args.task == 'prediction' and 'heart_rate' in args.y_vals:
+    elif args.task == 'prediction' and 'tar_heart_rate' in args.y_vals:
         y = get_hr_zone_targets(raw_data, y)
         tensor_y = torch.from_numpy(y).float()
     
