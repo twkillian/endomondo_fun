@@ -31,3 +31,8 @@ def setup_parser():
     parser.add_argument('--checkpoint_dir', type=str, default = '.', help = 'Checkpoint directory')
     parser.add_argument('--final_save_fpath', type=str, default = 'saved_models/model.tar', help = 'Final filepath in which to save model')
     return parser
+
+def setup_test_parser():
+    parser = argparse.ArgumentParser(prog = 'TEST TCN', description = 'Test convolution approaches for time series forecasting and prediction')
+    parser.add_argument('--model_path', type=str, default = 'saved_models/model.tar', help = 'Path of saved model for testing')
+    return parser
