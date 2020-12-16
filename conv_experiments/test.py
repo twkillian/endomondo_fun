@@ -22,8 +22,8 @@ def evaluate(args, model, criterion, loader):
             losses.append(loss.item())
 
             if args.loss == 'bce':
-                label_preds = y_pred.round()
-                correct += (label_preds == y).sum()
+                label_preds = torch.sigmoid(y_pred).round()
+                correct += (label_preds == y).sum().item()
 
     mean_acc = correct / total
     mean_loss = np.mean(losses)
