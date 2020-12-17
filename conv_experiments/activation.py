@@ -4,6 +4,7 @@ from torch import nn
 from parameters import setup_test_parser, print_args
 import data_utils
 import seaborn as sb
+import matplotlib.pyplot as plt
 from argparse import Namespace
 from utils import get_model
 from scipy.stats import spearmanr
@@ -27,7 +28,7 @@ def getCAM(feature_conv, weight_fc, class_idx):
     cam_img = cam / np.max(cam)
     return [cam_img]
     
-def createCAM(args, model):
+def createCAM(args, model, raw_data, tensor_input):
     weight_softmax_params = list(model._modules.get('linear').parameters())
     weight_softmax = np.squeeze(weight_softmax_params[0].cpu().data.numpy())
     
@@ -55,7 +56,7 @@ def plot_heatmap(args, raw_data, heatmap, idx):
         axs[i].plot(x, y)
         axs[i].set_ylabel(x_val)
     axs[i].set_xlabel('Workout time step')
-    h = sb.heatmap(overlay, yticklabels = ['Final layer activation'], ax = axs[-1])
+    h = sb.heatmap(heatmap, yticklabels = ['Final layer activation'], ax = axs[-1])
     h.tick_params(left=False, bottom=False, labelbottom=False)
     
     fig.suptitle('CAM for '+raw_data[idx][args.y_vals[0]]+', workout ID: '+raw_data[idx]['id'])
@@ -72,8 +73,8 @@ def main(args):
     
     raw_data, tensor_input, tensor_y = data_utils.get_npy_data(train_args)
     
-    heatmap, idx = createCAM(train_args, model)
-    plot_heatmap(args, raw_data, heatmap, idx)
+    heatmap, idx = createCAM(train_args, model, raw_data, tensor_input)
+    plot_heatmap(train_args, raw_data, heatmap, idx)
 
 if __name__ == "__main__":
     args = setup_test_parser().parse_args()
