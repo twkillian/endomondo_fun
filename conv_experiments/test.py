@@ -11,7 +11,7 @@ def evaluate(args, model, criterion, loader):
     model.eval()
     losses = []
     correct = 0
-    total = len(loader)
+    total = 0
     with torch.no_grad():
         for x,y in loader:
             x = x.to(device)
@@ -24,6 +24,8 @@ def evaluate(args, model, criterion, loader):
             if args.loss == 'bce':
                 label_preds = torch.sigmoid(y_pred).round()
                 correct += (label_preds == y).sum().item()
+            
+            total += x.shape[0]
 
     mean_acc = correct / total
     mean_loss = np.mean(losses)
