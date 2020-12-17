@@ -1,8 +1,12 @@
 import torch
+import numpy as np
 from torch import nn
 from parameters import setup_test_parser, print_args
 import data_utils
 import seaborn as sb
+from argparse import Namespace
+from utils import get_model
+from scipy.stats import spearmanr
 
 # partially from https://snappishproductions.com/blog/2018/01/03/class-activation-mapping-in-pytorch.html.html
 
@@ -48,9 +52,9 @@ def plot_heatmap(args, raw_data, heatmap, idx):
     for i, x_val in enumerate(args.x_vals):
         x = range(len(raw_data[idx][x_val]))
         y = raw_data[idx][x_val]
-        axs[i].plt(x, y)
-        axs[i].ylabel(x_val)
-    axs[i].xlabel('Workout time step')
+        axs[i].plot(x, y)
+        axs[i].set_ylabel(x_val)
+    axs[i].set_xlabel('Workout time step')
     h = sb.heatmap(overlay, yticklabels = ['Final layer activation'], ax = axs[-1])
     h.tick_params(left=False, bottom=False, labelbottom=False)
     
@@ -66,7 +70,7 @@ def main(args):
     model = get_model(train_args)
     model.load_state_dict(info['model_state_dict'])
     
-    raw_data, tensor_input, tensor_y = data_utils.get_npy_data(args)
+    raw_data, tensor_input, tensor_y = data_utils.get_npy_data(train_args)
     
     heatmap, idx = createCAM(train_args, model)
     plot_heatmap(args, raw_data, heatmap, idx)
